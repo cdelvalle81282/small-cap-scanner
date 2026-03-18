@@ -95,12 +95,18 @@ class YFinanceProvider(DataProvider):
             if "period" not in df.columns:
                 df["period"] = df.get("report_date", None)
 
-            # Compute eps_prior (shift eps_actual by 4 quarters = 1 year prior)
+            # Use eps_estimate (analyst consensus) as the prior for computing EPS surprise.
+            # yfinance only returns ~4 quarters so shift(4) for YoY won't work.
+            # Earnings surprise vs estimate is the more meaningful signal anyway.
             df = df.sort_values("report_date")
-            df["eps_prior"] = df["eps_actual"].shift(4)
+            if "eps_estimate" in df.columns:
+                df["eps_prior"] = df["eps_estimate"]
+            else:
+                # Fallback: quarter-over-quarter comparison
+                df["eps_prior"] = df["eps_actual"].shift(1)
             df["eps_change_pct"] = df.apply(
                 lambda r: (
-                    (r["eps_actual"] - r["eps_prior"]) / abs(r["eps_prior"]) * 100
+                    round((r["eps_actual"] - r["eps_prior"]) / abs(r["eps_prior"]) * 100, 2)
                     if pd.notna(r.get("eps_prior")) and r.get("eps_prior") != 0
                     else None
                 ),
