@@ -7,13 +7,13 @@ from core.providers.base import DataProvider
 
 logger = logging.getLogger(__name__)
 
-FALLBACK_SMALL_CAPS = [
-    "ACMR", "AEHR", "ALEC", "APTO", "AREC",
-    "AULT", "BSFC", "BTBT", "CLOV", "COMS",
-    "DARE", "DPRO", "EKSO", "ELOX", "EOLS",
-    "GFAI", "GOED", "HCDI", "HPNN", "IMVT",
-    "JBDI", "KNDI", "LFLY", "LPSN", "MFIN",
-    "MVST", "NKLA", "OCGN", "OPAD", "PRST",
+# Validated small cap tickers ($1-$20, have earnings data, confirmed active March 2026)
+SMALL_CAP_UNIVERSE = [
+    "AGEN", "AI", "ALEC", "BBAI", "BTBT", "CHPT", "CLOV", "CRMD",
+    "DNA", "DPRO", "EOLS", "EVGO", "FCEL", "GENI", "GERN", "IBRX",
+    "IQ", "LPSN", "LUNR", "MARA", "MFIN", "MVST", "OCGN", "OPEN",
+    "PLUG", "PSFE", "QBTS", "QS", "RKT", "SKLZ", "SOFI", "STEM",
+    "UWMC", "VUZI",
 ]
 
 
@@ -106,21 +106,47 @@ class YFinanceProvider(DataProvider):
             return empty
 
     def get_small_cap_universe(self, min_price: float, max_price: float) -> list[str]:
+        """Return tickers from our universe that currently trade within the price range.
+
+        Batch-downloads recent prices to filter, so only one API call is needed.
+        """
+        candidates = list(SMALL_CAP_UNIVERSE)
         try:
-            screener = yf.Screener()
-            screener.set_predefined_body("small_cap_gainers")
-            result = screener.response
-            quotes = result.get("quotes", [])
-            tickers = [
-                q["symbol"]
-                for q in quotes
-                if min_price <= q.get("regularMarketPrice", 0) <= max_price
-            ]
-            if tickers:
-                return tickers
+            import pandas as pd
+
+            data = yf.download(candidates, period="5d", progress=False, threads=True)
+            if data.empty:
+                logger.warning("Batch download returned no data, returning full universe")
+                return candidates
+
+            # Handle both single-ticker and multi-ticker DataFrame shapes
+            if isinstance(data.columns, pd.MultiIndex):
+                last_prices = data["Close"].iloc[-1]
+            else:
+                last_prices = data["Close"].iloc[-1:]
+
+            valid = []
+            for ticker in candidates:
+                try:
+                    price = (
+                        last_prices[ticker]
+                        if isinstance(last_prices, pd.Series)
+                        else float(last_prices.iloc[0])
+                    )
+                    if pd.notna(price) and min_price <= price <= max_price:
+                        valid.append(ticker)
+                except (KeyError, IndexError):
+                    continue
+
+            if valid:
+                logger.info("Price-filtered universe: %d/%d tickers in $%.0f-$%.0f range",
+                            len(valid), len(candidates), min_price, max_price)
+                return valid
+
         except Exception:
-            logger.warning("YFinance screener failed, using fallback list")
-        return list(FALLBACK_SMALL_CAPS)
+            logger.exception("Batch price filter failed, returning full universe")
+
+        return candidates
 
     def get_fundamentals(self, ticker: str) -> pd.DataFrame:
         empty = pd.DataFrame(
