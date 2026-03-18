@@ -176,7 +176,7 @@ for earn in earnings:
     chg_label = f"+{chg:.1f}%" if (chg is not None and chg >= 0) else (f"{chg:.1f}%" if chg is not None else "N/A")
 
     fig.add_vline(
-        x=rd,
+        x=rd.strftime("%Y-%m-%d"),
         line=dict(color=line_color, width=1, dash="dot"),
         annotation_text=f"EPS: {chg_label}",
         annotation_position="top",
@@ -192,7 +192,7 @@ if signal_data:
         ma_period = signal_data.get("ma_period", "?")
         direction = signal_data.get("signal_type", "Cross")
         fig.add_vline(
-            x=trend_date,
+            x=trend_date.strftime("%Y-%m-%d"),
             line=dict(color="purple", width=2, dash="solid"),
             annotation_text=f"MA{ma_period} Cross ({direction})",
             annotation_position="top",
