@@ -7,13 +7,21 @@ from core.providers.base import DataProvider
 
 logger = logging.getLogger(__name__)
 
-# Validated small cap tickers ($1-$20, have earnings data, confirmed active March 2026)
+# Validated tickers ($1-$20, confirmed active March 2026)
+# Covers biotech, tech, EV/energy, fintech, space, consumer, cannabis
+# get_small_cap_universe() dynamically filters by current price range
 SMALL_CAP_UNIVERSE = [
-    "AGEN", "AI", "ALEC", "BBAI", "BTBT", "CHPT", "CLOV", "CRMD",
-    "DNA", "DPRO", "EOLS", "EVGO", "FCEL", "GENI", "GERN", "IBRX",
-    "IQ", "LPSN", "LUNR", "MARA", "MFIN", "MVST", "OCGN", "OPEN",
-    "PLUG", "PSFE", "QBTS", "QS", "RKT", "SKLZ", "SOFI", "STEM",
-    "UWMC", "VUZI",
+    "ACB", "AGEN", "AI", "ALEC", "ARBK", "AREC", "ARRY", "BBAI",
+    "BCRX", "BIRD", "BMBL", "BRZE", "BTBT", "CGC", "CHPT", "CLF",
+    "CLOV", "COUR", "CRMD", "DARE", "DNA", "DPRO", "EOLS", "EVGO",
+    "FATE", "FCEL", "FIGS", "FLYW", "FRSH", "GENI", "GERN", "HYLN",
+    "IBRX", "IQ", "KNDI", "LPSN", "LUNR", "MARA", "MAXN", "MFIN",
+    "MNKD", "MNTS", "MVST", "NAVI", "NCMI", "OCGN", "OPEN", "PAYO",
+    "PLBY", "PLUG", "PSFE", "PUBM", "QBTS", "QS", "RCKT", "RDW",
+    "RENT", "RGNX", "RGTI", "RIOT", "RKT", "RUN", "RXRX", "SATL",
+    "SAVA", "SKIN", "SKLZ", "SMPL", "SNDL", "SOFI", "SPCE", "SPT",
+    "STEM", "TASK", "TLRY", "UWMC", "VUZI", "WEAV", "WKHS", "XNCR",
+    "XPOF", "YEXT", "ZNTL",
 ]
 
 

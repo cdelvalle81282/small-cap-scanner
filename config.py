@@ -8,7 +8,7 @@ class ScannerConfig:
     min_price: float = 1.0
     max_price: float = 20.0
     min_market_cap: float = 50_000_000       # $50M
-    max_market_cap: float = 2_000_000_000    # $2B
+    max_market_cap: float = 10_000_000_000   # $10B
     ma_periods: list[int] = field(default_factory=lambda: [20, 50, 200])
     eps_change_threshold: float = 10.0       # percent
     trend_window_days: int = 30
