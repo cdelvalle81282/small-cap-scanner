@@ -170,7 +170,7 @@ def test_full_pipeline_to_scan(full_system):
         max_price=20.0,
         min_market_cap=50_000_000,
         max_market_cap=2_000_000_000,
-        ma_periods=[20],
+        ma_crossover_pairs=[(20, 50)],
         eps_change_threshold=10.0,
         trend_window_days=30,
         direction="both",
@@ -190,7 +190,7 @@ def test_full_pipeline_to_backtest(full_system):
         max_price=20.0,
         min_market_cap=50_000_000,
         max_market_cap=2_000_000_000,
-        ma_periods=[20],
+        ma_crossover_pairs=[(20, 50)],
         eps_change_threshold=10.0,
         trend_window_days=30,
         direction="both",
@@ -198,8 +198,8 @@ def test_full_pipeline_to_backtest(full_system):
     backtest_config = BacktestConfig(
         start_date=START.isoformat(),
         end_date=END.isoformat(),
-        forward_return_days=[10, 20],
-        ma_periods=[20],
+        forward_return_days=[10, 15],
+        ma_crossover_pairs=[(20, 50)],
         eps_thresholds=[10.0],
         trend_windows=[30],
     )
@@ -213,5 +213,9 @@ def test_full_pipeline_to_backtest(full_system):
 
     if summary["total_signals"] > 0:
         assert "by_horizon" in summary
-        for horizon in [10, 20]:
+        for horizon in [10, 15]:
             assert horizon in summary["by_horizon"]
+            stats = summary["by_horizon"][horizon]
+            for key in ["profit_factor", "expectancy", "win_count", "loss_count"]:
+                assert key in stats
+            assert stats["win_count"] + stats["loss_count"] == stats["sample_size"]

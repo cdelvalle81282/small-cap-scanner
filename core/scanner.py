@@ -39,11 +39,12 @@ class Scanner:
             if eps_date > as_of_date:
                 continue
 
-            for ma_period in self.config.ma_periods:
+            for fast_period, slow_period in self.config.ma_crossover_pairs:
                 crossover = self._find_ma_crossover(
                     ticker,
                     eps_date,
-                    ma_period,
+                    fast_period,
+                    slow_period,
                     self.config.trend_window_days,
                 )
                 if crossover is None:
@@ -57,7 +58,8 @@ class Scanner:
                     "ticker": ticker,
                     "scan_date": as_of_date,
                     "signal_type": direction,
-                    "ma_period": ma_period,
+                    "fast_ma": fast_period,
+                    "slow_ma": slow_period,
                     "eps_change_pct": eps_change,
                     "trend_change_date": crossover["date"],
                     "eps_change_date": eps_date,
@@ -70,13 +72,14 @@ class Scanner:
         self,
         ticker: str,
         eps_date: str,
-        ma_period: int,
+        fast_period: int,
+        slow_period: int,
         window_days: int,
     ) -> dict | None:
         eps_dt = date.fromisoformat(eps_date)
 
-        # Fetch enough history to compute the MA before the window starts
-        fetch_start = eps_dt - timedelta(days=ma_period + window_days + 30)
+        # Fetch enough history to compute the slow MA before the window starts
+        fetch_start = eps_dt - timedelta(days=slow_period + window_days + 30)
         fetch_end = eps_dt + timedelta(days=window_days)
 
         rows = self.db.get_daily_prices(
@@ -84,19 +87,20 @@ class Scanner:
             fetch_start.isoformat(),
             fetch_end.isoformat(),
         )
-        if len(rows) < ma_period:
+        if len(rows) < slow_period:
             return None
 
         df = pd.DataFrame(rows)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
-        df["sma"] = df["close"].rolling(window=ma_period, min_periods=ma_period).mean()
+        df["sma_fast"] = df["close"].rolling(window=fast_period, min_periods=fast_period).mean()
+        df["sma_slow"] = df["close"].rolling(window=slow_period, min_periods=slow_period).mean()
 
-        # Restrict crossover search to the window around the EPS date
-        window_start = eps_dt - timedelta(days=window_days)
+        # Only count crossovers that happen AFTER the EPS report
+        window_start = eps_dt
         window_end = eps_dt + timedelta(days=window_days)
         mask = (df["date"].dt.date >= window_start) & (df["date"].dt.date <= window_end)
-        window_df = df[mask].dropna(subset=["sma"]).reset_index(drop=True)
+        window_df = df[mask].dropna(subset=["sma_fast", "sma_slow"]).reset_index(drop=True)
 
         if len(window_df) < 2:
             return None
@@ -106,8 +110,8 @@ class Scanner:
             prev = window_df.iloc[i - 1]
             curr = window_df.iloc[i]
 
-            prev_above = prev["close"] > prev["sma"]
-            curr_above = curr["close"] > curr["sma"]
+            prev_above = prev["sma_fast"] > prev["sma_slow"]
+            curr_above = curr["sma_fast"] > curr["sma_slow"]
 
             if not prev_above and curr_above:
                 direction = "bullish"

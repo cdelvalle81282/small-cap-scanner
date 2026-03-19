@@ -1,4 +1,5 @@
 import sys
+import math
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +26,32 @@ def get_db() -> Database:
 
 db = get_db()
 
+MA_PAIR_OPTIONS = {
+    "20/50": (20, 50),
+    "50/200": (50, 200),
+}
+
+
+def format_pct(value: float | None, signed: bool = True) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    sign = "+" if signed else ""
+    return f"{value:{sign}.2f}%"
+
+
+def format_price(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    return f"${value:.2f}"
+
+
+def format_ratio(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    if math.isinf(value):
+        return "∞"
+    return f"{value:.2f}"
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("Backtest Settings")
@@ -45,7 +72,9 @@ tab1, tab2 = st.tabs(["Single Backtest", "Parameter Sweep"])
 with tab1:
     col1, col2, col3 = st.columns(3)
     with col1:
-        ma_period = st.selectbox("MA Period", options=[20, 50, 200], index=0, key="single_ma")
+        ma_pair_label = st.selectbox(
+            "MA Crossover", options=list(MA_PAIR_OPTIONS.keys()), index=0, key="single_ma"
+        )
     with col2:
         eps_threshold = st.number_input(
             "EPS Change Threshold (%)", value=10.0, min_value=0.0, step=1.0, key="single_eps"
@@ -56,10 +85,11 @@ with tab1:
         )
 
     if st.button("Run Backtest", type="primary", key="run_single"):
+        ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
         scanner_cfg = ScannerConfig(
             min_price=float(min_price),
             max_price=float(max_price),
-            ma_periods=[int(ma_period)],
+            ma_crossover_pairs=[ma_pair],
             eps_change_threshold=float(eps_threshold),
             trend_window_days=int(trend_window),
             direction=direction,
@@ -73,8 +103,13 @@ with tab1:
             backtester = Backtester(db, scanner_cfg, backtest_cfg)
             result = backtester.run()
 
-        signals = result["signals"]
-        summary = result["summary"]
+        st.session_state["backtest_results"] = result
+
+    # --- Display persisted results ---
+    bt_result = st.session_state.get("backtest_results")
+    if bt_result is not None:
+        signals = bt_result["signals"]
+        summary = bt_result["summary"]
         total = summary.get("total_signals", 0)
 
         st.metric("Total Signals", total)
@@ -84,20 +119,71 @@ with tab1:
         else:
             by_horizon = summary.get("by_horizon", {})
 
-            # Summary table
+            # Summary by horizon — expandable to see individual signals
             st.subheader("Performance by Horizon")
-            horizon_rows = []
             for horizon, stats in sorted(by_horizon.items()):
-                horizon_rows.append({
-                    "Horizon (days)": horizon,
-                    "Win Rate %": f"{stats['win_rate']:.1f}%" if stats["win_rate"] is not None else "N/A",
-                    "Avg Return %": f"{stats['avg_return']:+.2f}%" if stats["avg_return"] is not None else "N/A",
-                    "Median Return %": f"{stats['median_return']:+.2f}%" if stats["median_return"] is not None else "N/A",
-                    "Max Gain %": f"{stats['max_gain']:+.2f}%" if stats["max_gain"] is not None else "N/A",
-                    "Max Loss %": f"{stats['max_loss']:+.2f}%" if stats["max_loss"] is not None else "N/A",
-                    "Sample Size": stats["sample_size"],
-                })
-            st.dataframe(pd.DataFrame(horizon_rows), hide_index=True, use_container_width=True)
+                win_rate = format_pct(stats["win_rate"], signed=False)
+                avg_ret = format_pct(stats["avg_return"])
+                median_ret = format_pct(stats["median_return"])
+                profit_factor = format_ratio(stats.get("profit_factor"))
+                sample = stats["sample_size"]
+                win_count = stats.get("win_count", 0)
+                loss_count = stats.get("loss_count", 0)
+
+                label = (
+                    f"{horizon}-Day  |  Win Rate: {win_rate}  |  "
+                    f"W/L: {win_count}/{loss_count}  |  PF: {profit_factor}  |  "
+                    f"Avg: {avg_ret}  |  Median: {median_ret}  |  "
+                    f"Signals: {sample}"
+                )
+                with st.expander(label):
+                    # Collect signals that have a return for this horizon
+                    horizon_signals = []
+                    for sig in signals:
+                        fwd = sig.get("forward_returns", {})
+                        ret = fwd.get(horizon)
+                        if ret is not None:
+                            horizon_signals.append({**sig, "_return": ret})
+
+                    if not horizon_signals:
+                        st.info("No signals with data for this horizon.")
+                        continue
+
+                    horizon_signals.sort(key=lambda s: s["_return"], reverse=True)
+
+                    # Build a dataframe for clean display
+                    rows = []
+                    for sig in horizon_signals:
+                        trade_detail = sig.get("trade_details", {}).get(horizon, {})
+                        rows.append({
+                            "Ticker": sig.get("ticker", ""),
+                            "Signal": sig.get("signal_type", ""),
+                            "MA Cross": f"{sig.get('fast_ma', '')}/{sig.get('slow_ma', '')}",
+                            "EPS Change": f"{sig['eps_change_pct']:+.1f}%" if sig.get("eps_change_pct") is not None else "N/A",
+                            "EPS Date": sig.get("eps_change_date", ""),
+                            "Cross Date": sig.get("trend_change_date", ""),
+                            "Entry Date": sig.get("entry_date", ""),
+                            "Entry Price": format_price(sig.get("entry_price")),
+                            "Exit Date": trade_detail.get("exit_date") or "N/A",
+                            "Exit Price": format_price(trade_detail.get("exit_price")),
+                            "Exit Reason": trade_detail.get("exit_reason") or "N/A",
+                            f"{horizon}d Return": format_pct(sig["_return"]),
+                        })
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+                    # Clickable ticker buttons to navigate to Stock Detail
+                    st.caption("Click a ticker to view its chart:")
+                    btn_cols = st.columns(min(len(horizon_signals), 8))
+                    for i, sig in enumerate(horizon_signals):
+                        col_idx = i % min(len(horizon_signals), 8)
+                        ticker_val = sig.get("ticker", "")
+                        if btn_cols[col_idx].button(
+                            ticker_val,
+                            key=f"hz_{horizon}_{ticker_val}_{sig.get('trend_change_date')}",
+                        ):
+                            st.session_state["selected_ticker"] = ticker_val
+                            st.session_state["signal_data"] = sig
+                            st.switch_page("pages/2_Stock_Detail.py")
 
             # Box plot: forward return distribution by horizon
             st.subheader("Return Distribution by Horizon")
@@ -121,19 +207,31 @@ with tab1:
                 )
                 fig_box.add_hline(y=0, line=dict(color="white", width=1, dash="dash"))
                 fig_box.update_layout(height=400, margin=dict(l=0, r=0, t=30, b=0))
-                st.plotly_chart(fig_box, use_container_width=True)
+                st.plotly_chart(
+                    fig_box,
+                    use_container_width=True,
+                    config={"scrollZoom": True},
+                )
 
             # Individual signals table
             st.subheader("Individual Signals")
+            header_cols = st.columns([1, 2, 2, 2, 2, 2, 2])
+            header_cols[0].markdown("**Ticker**")
+            header_cols[1].markdown("**Signal**")
+            header_cols[2].markdown("**MA Cross**")
+            header_cols[3].markdown("**EPS Change**")
+            header_cols[4].markdown("**Cross Date**")
+            header_cols[5].markdown("**EPS Date**")
+            header_cols[6].markdown("**Days Between**")
             for sig in signals:
-                cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2])
+                cols = st.columns([1, 2, 2, 2, 2, 2, 2])
                 ticker_val = sig.get("ticker", "")
                 if cols[0].button(ticker_val, key=f"sig_{ticker_val}_{sig.get('trend_change_date')}"):
                     st.session_state["selected_ticker"] = ticker_val
                     st.session_state["signal_data"] = sig
                     st.switch_page("pages/2_Stock_Detail.py")
                 cols[1].write(sig.get("signal_type", ""))
-                cols[2].write(str(sig.get("ma_period", "")))
+                cols[2].write(f"{sig.get('fast_ma', '')}/{sig.get('slow_ma', '')}")
                 eps_chg = sig.get("eps_change_pct")
                 cols[3].write(f"{eps_chg:+.1f}%" if eps_chg is not None else "N/A")
                 cols[4].write(sig.get("trend_change_date", ""))
@@ -147,8 +245,11 @@ with tab1:
 with tab2:
     sw_col1, sw_col2, sw_col3, sw_col4 = st.columns(4)
     with sw_col1:
-        sweep_ma_periods = st.multiselect(
-            "MA Periods", options=[20, 50, 200], default=[20, 50, 200], key="sweep_ma"
+        sweep_ma_pairs = st.multiselect(
+            "MA Crossovers",
+            options=list(MA_PAIR_OPTIONS.keys()),
+            default=list(MA_PAIR_OPTIONS.keys()),
+            key="sweep_ma",
         )
     with sw_col2:
         sweep_eps_thresholds = st.multiselect(
@@ -161,14 +262,15 @@ with tab2:
     with sw_col4:
         sweep_horizon = st.selectbox(
             "Comparison Horizon (days)",
-            options=[5, 10, 20, 30, 60],
+            options=[5, 10, 15, 30, 60],
             index=2,
             key="sweep_horizon",
         )
 
-    if not sweep_ma_periods or not sweep_eps_thresholds or not sweep_trend_windows:
+    if not sweep_ma_pairs or not sweep_eps_thresholds or not sweep_trend_windows:
         st.warning("Select at least one value for each parameter.")
     elif st.button("Run Parameter Sweep", type="primary", key="run_sweep"):
+        selected_pairs = [MA_PAIR_OPTIONS[label] for label in sweep_ma_pairs]
         scanner_cfg = ScannerConfig(
             min_price=float(min_price),
             max_price=float(max_price),
@@ -178,7 +280,7 @@ with tab2:
             start_date=start_date.isoformat(),
             end_date=end_date.isoformat(),
             forward_return_days=[int(sweep_horizon)],
-            ma_periods=[int(p) for p in sweep_ma_periods],
+            ma_crossover_pairs=selected_pairs,
             eps_thresholds=[float(t) for t in sweep_eps_thresholds],
             trend_windows=[int(w) for w in sweep_trend_windows],
         )
@@ -187,6 +289,11 @@ with tab2:
             backtester = Backtester(db, scanner_cfg, backtest_cfg)
             sweep_results = backtester.parameter_sweep()
 
+        st.session_state["sweep_results"] = sweep_results
+
+    # --- Display persisted sweep results ---
+    sweep_results = st.session_state.get("sweep_results")
+    if sweep_results is not None:
         if not sweep_results:
             st.info("No results returned from parameter sweep.")
         else:
@@ -196,36 +303,46 @@ with tab2:
             st.subheader("Parameter Sweep Results")
             display_df = sweep_df.copy()
             display_df["win_rate"] = display_df["win_rate"].apply(
-                lambda v: f"{v:.1f}%" if pd.notna(v) else "N/A"
+                lambda v: format_pct(v, signed=False)
             )
             display_df["avg_return"] = display_df["avg_return"].apply(
-                lambda v: f"{v:+.2f}%" if pd.notna(v) else "N/A"
+                format_pct
+            )
+            display_df["profit_factor"] = display_df["profit_factor"].apply(
+                format_ratio
+            )
+            display_df["expectancy"] = display_df["expectancy"].apply(
+                format_pct
             )
             display_df.columns = [
-                "MA Period", "EPS Threshold %", "Trend Window (days)",
-                "Total Signals", "Win Rate", "Avg Return", "Sample Size",
+                "MA Crossover", "EPS Threshold %", "Trend Window (days)",
+                "Total Signals", "Win Rate", "Avg Return", "Profit Factor",
+                "Expectancy", "Sample Size",
             ]
             st.dataframe(display_df, hide_index=True, use_container_width=True)
 
-            # Heatmap: win_rate by MA Period vs EPS Threshold
-            if len(sweep_ma_periods) > 1 and len(sweep_eps_thresholds) > 1:
-                st.subheader("Win Rate Heatmap (MA Period vs EPS Threshold)")
-                # Aggregate by ma_period and eps_threshold (mean over trend windows)
+            # Heatmap: win_rate by MA Crossover vs EPS Threshold
+            if len(sweep_df["ma_crossover"].unique()) > 1 and len(sweep_df["eps_threshold"].unique()) > 1:
+                st.subheader("Win Rate Heatmap (MA Crossover vs EPS Threshold)")
                 pivot_df = (
                     sweep_df[sweep_df["win_rate"].notna()]
-                    .groupby(["ma_period", "eps_threshold"])["win_rate"]
+                    .groupby(["ma_crossover", "eps_threshold"])["win_rate"]
                     .mean()
                     .reset_index()
-                    .pivot(index="ma_period", columns="eps_threshold", values="win_rate")
+                    .pivot(index="ma_crossover", columns="eps_threshold", values="win_rate")
                 )
 
                 if not pivot_df.empty:
                     fig_heat = px.imshow(
                         pivot_df,
-                        labels=dict(x="EPS Threshold %", y="MA Period", color="Win Rate %"),
+                        labels=dict(x="EPS Threshold %", y="MA Crossover", color="Win Rate %"),
                         color_continuous_scale="RdYlGn",
                         text_auto=".1f",
                         template="plotly_dark",
                     )
                     fig_heat.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0))
-                    st.plotly_chart(fig_heat, use_container_width=True)
+                    st.plotly_chart(
+                        fig_heat,
+                        use_container_width=True,
+                        config={"scrollZoom": True},
+                    )

@@ -24,12 +24,17 @@ db = get_db()
 
 st.title("Small Cap Scanner")
 
+MA_PAIR_OPTIONS = {
+    "20/50": (20, 50),
+    "50/200": (50, 200),
+}
+
 # Sidebar controls
 with st.sidebar:
     st.header("Scan Parameters")
     min_price = st.number_input("Min Price ($)", value=1.0, min_value=0.01, step=0.5)
     max_price = st.number_input("Max Price ($)", value=20.0, min_value=0.01, step=1.0)
-    ma_period = st.selectbox("MA Period", options=[20, 50, 200], index=0)
+    ma_pair_label = st.selectbox("MA Crossover", options=list(MA_PAIR_OPTIONS.keys()), index=0)
     eps_threshold = st.slider("Min EPS Change %", min_value=1, max_value=100, value=10)
     trend_window = st.slider("Trend Window (days)", min_value=5, max_value=90, value=30)
     direction = st.selectbox("Signal Direction", options=["both", "bullish", "bearish"], index=0)
@@ -37,10 +42,11 @@ with st.sidebar:
 run_scan = st.button("Run Scanner", type="primary")
 
 if run_scan:
+    ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
     config = ScannerConfig(
         min_price=min_price,
         max_price=max_price,
-        ma_periods=[ma_period],
+        ma_crossover_pairs=[ma_pair],
         eps_change_threshold=float(eps_threshold),
         trend_window_days=trend_window,
         direction=direction,
@@ -49,46 +55,62 @@ if run_scan:
     as_of_date = datetime.now().strftime("%Y-%m-%d")
 
     with st.spinner("Scanning..."):
-        results = scanner.scan(as_of_date)
+        all_signals = scanner.scan(as_of_date)
 
+    # Keep only the most recent signal per ticker (most recent by trend_change_date)
+    latest_by_ticker: dict[str, dict] = {}
+    for sig in all_signals:
+        ticker = sig["ticker"]
+        if ticker not in latest_by_ticker or sig["trend_change_date"] > latest_by_ticker[ticker]["trend_change_date"]:
+            latest_by_ticker[ticker] = sig
+    results = sorted(latest_by_ticker.values(), key=lambda s: s["trend_change_date"], reverse=True)
+
+    st.session_state["scan_results"] = results
+
+# Display results (persisted across page navigations)
+results = st.session_state.get("scan_results")
+
+if results is not None:
     if results:
-        st.success(f"Found {len(results)} signal(s).")
+        import pandas as pd
 
-        # Header row
-        cols = st.columns(7)
-        headers = ["Ticker", "Signal", "MA Period", "EPS Chg %", "EPS Date", "MA Cross Date", "Days Between"]
-        for col, header in zip(cols, headers):
-            col.markdown(f"**{header}**")
+        # --- Total results count at the top ---
+        st.metric("Total Signals", len(results))
 
-        st.divider()
+        # --- Clickable ticker buttons ---
+        st.subheader("Tickers")
+        n_cols = min(len(results), 10)
+        rows = [results[i : i + n_cols] for i in range(0, len(results), n_cols)]
+        for row_chunk in rows:
+            btn_cols = st.columns(n_cols)
+            for i, result in enumerate(row_chunk):
+                ticker = result["ticker"]
+                signal = result.get("signal_type", "")
+                label = f"{'🟢' if signal == 'bullish' else '🔴'} {ticker}"
+                with btn_cols[i]:
+                    if st.button(label, key=f"ticker_{ticker}_{result['trend_change_date']}"):
+                        st.session_state["selected_ticker"] = ticker
+                        st.session_state["signal_data"] = result
+                        st.switch_page("pages/2_Stock_Detail.py")
 
-        for result in results:
-            cols = st.columns(7)
-            ticker = result["ticker"]
-
-            with cols[0]:
-                if st.button(ticker, key=f"ticker_{ticker}_{result['trend_change_date']}"):
-                    st.session_state["selected_ticker"] = ticker
-                    st.session_state["signal_data"] = result
-                    st.switch_page("pages/2_Stock_Detail.py")
-
-            signal_type = result.get("signal_type", "")
-            cols[1].markdown(
-                f":green[{signal_type}]" if signal_type == "bullish" else f":red[{signal_type}]"
+        # --- Compact dataframe (no side scroll) ---
+        st.subheader("Details")
+        table_rows = []
+        for r in results:
+            eps_chg = r.get("eps_change_pct")
+            table_rows.append(
+                {
+                    "Ticker": r["ticker"],
+                    "Signal": r.get("signal_type", ""),
+                    "MA Cross": f"{r.get('fast_ma', '')}/{r.get('slow_ma', '')}",
+                    "EPS Chg %": f"{eps_chg:+.1f}%" if eps_chg is not None else "N/A",
+                    "EPS Date": r.get("eps_change_date", ""),
+                    "Cross Date": r.get("trend_change_date", ""),
+                    "Days Between": r.get("days_between", ""),
+                }
             )
-            cols[2].write(result.get("ma_period", ""))
-
-            eps_chg = result.get("eps_change_pct")
-            if eps_chg is not None:
-                cols[3].markdown(
-                    f":green[+{eps_chg:.1f}%]" if eps_chg >= 0 else f":red[{eps_chg:.1f}%]"
-                )
-            else:
-                cols[3].write("N/A")
-
-            cols[4].write(result.get("eps_change_date", ""))
-            cols[5].write(result.get("trend_change_date", ""))
-            cols[6].write(result.get("days_between", ""))
+        df = pd.DataFrame(table_rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info(
             "No signals found for the selected parameters. "

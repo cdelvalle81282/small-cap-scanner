@@ -40,12 +40,13 @@ def _make_prices(ticker: str, base_date: date, closes: list[float]) -> list[dict
     return rows
 
 
-def _bullish_closes(n_low: int = 40, n_high: int = 20, low: float = 4.0, high: float = 6.0) -> list[float]:
+def _bullish_closes() -> list[float]:
     """
-    Returns closes that are below `low` for n_low days then jump to `high`
-    for n_high days, producing a clear bullish MA-20 crossover.
+    Returns closes that produce a clear bullish 20/50 MA crossover.
+    100 days at 4.0 (both MAs settle at 4.0), then 60 days at 6.0
+    (SMA20 jumps to 6.0 much faster than SMA50 → cross).
     """
-    return [low] * n_low + [high] * n_high
+    return [4.0] * 100 + [6.0] * 60
 
 
 # ---------------------------------------------------------------------------
@@ -65,20 +66,19 @@ def db(tmp_path):
 
 def test_scanner_finds_bullish_signal(db):
     """
-    BULL has 60 days of prices: 40 days at 4.0, then 20 days at 6.0.
-    The MA-20 will be dragged up over time; the cross from below to above
-    occurs within the window around the EPS report date.
-    EPS report on day 35 (5 days into the high-price run) with 50% change.
-    Scanner (threshold=10%, direction="both") should detect a bullish signal.
+    BULL has 160 days of prices: 100 days at 4.0, then 60 days at 6.0.
+    The SMA20 will rise above SMA50 shortly after the price jump.
+    EPS report on day 105 (5 days into the high-price run) with 50% change.
+    Scanner should detect a bullish 20/50 crossover signal.
     """
     base = date(2024, 1, 1)
     db.upsert_stock(_stock("BULL"))
 
-    closes = _bullish_closes(n_low=40, n_high=20)
+    closes = _bullish_closes()
     db.insert_daily_prices(_make_prices("BULL", base, closes))
 
-    # EPS report on day 35 — price is already in the "high" zone
-    eps_date = (base + timedelta(days=35)).isoformat()
+    # EPS report on day 98 — just before the price jump at day 100
+    eps_date = (base + timedelta(days=98)).isoformat()
     db.insert_earnings([{
         "ticker": "BULL",
         "report_date": eps_date,
@@ -93,34 +93,35 @@ def test_scanner_finds_bullish_signal(db):
         max_price=20.0,
         min_market_cap=50_000_000,
         max_market_cap=2_000_000_000,
-        ma_periods=[20],
+        ma_crossover_pairs=[(20, 50)],
         eps_change_threshold=10.0,
         trend_window_days=30,
         direction="both",
     )
     scanner = Scanner(db, config)
-    as_of_date = (base + timedelta(days=59)).isoformat()
+    as_of_date = (base + timedelta(days=159)).isoformat()
     results = scanner.scan(as_of_date)
 
     bull_signals = [r for r in results if r["ticker"] == "BULL"]
     assert len(bull_signals) >= 1, "Expected at least one bullish signal for BULL"
     assert bull_signals[0]["signal_type"] == "bullish"
-    assert bull_signals[0]["ma_period"] == 20
+    assert bull_signals[0]["fast_ma"] == 20
+    assert bull_signals[0]["slow_ma"] == 50
     assert bull_signals[0]["eps_change_pct"] == pytest.approx(50.0)
 
 
 def test_scanner_respects_eps_threshold(db):
     """
-    Same price/earnings data as above but threshold=60% > 50% change.
-    Scanner should find no signals for BULL.
+    Same price/earnings data but threshold=60% > 50% change.
+    Scanner should find no signals.
     """
     base = date(2024, 1, 1)
     db.upsert_stock(_stock("BULL"))
 
-    closes = _bullish_closes(n_low=40, n_high=20)
+    closes = _bullish_closes()
     db.insert_daily_prices(_make_prices("BULL", base, closes))
 
-    eps_date = (base + timedelta(days=35)).isoformat()
+    eps_date = (base + timedelta(days=98)).isoformat()
     db.insert_earnings([{
         "ticker": "BULL",
         "report_date": eps_date,
@@ -135,13 +136,13 @@ def test_scanner_respects_eps_threshold(db):
         max_price=20.0,
         min_market_cap=50_000_000,
         max_market_cap=2_000_000_000,
-        ma_periods=[20],
-        eps_change_threshold=60.0,   # higher than 50%
+        ma_crossover_pairs=[(20, 50)],
+        eps_change_threshold=60.0,
         trend_window_days=30,
         direction="both",
     )
     scanner = Scanner(db, config)
-    as_of_date = (base + timedelta(days=59)).isoformat()
+    as_of_date = (base + timedelta(days=159)).isoformat()
     results = scanner.scan(as_of_date)
 
     assert results == [], f"Expected no signals, got: {results}"
@@ -154,10 +155,10 @@ def test_scanner_respects_direction_filter(db):
     base = date(2024, 1, 1)
     db.upsert_stock(_stock("BULL"))
 
-    closes = _bullish_closes(n_low=40, n_high=20)
+    closes = _bullish_closes()
     db.insert_daily_prices(_make_prices("BULL", base, closes))
 
-    eps_date = (base + timedelta(days=35)).isoformat()
+    eps_date = (base + timedelta(days=98)).isoformat()
     db.insert_earnings([{
         "ticker": "BULL",
         "report_date": eps_date,
@@ -172,13 +173,13 @@ def test_scanner_respects_direction_filter(db):
         max_price=20.0,
         min_market_cap=50_000_000,
         max_market_cap=2_000_000_000,
-        ma_periods=[20],
+        ma_crossover_pairs=[(20, 50)],
         eps_change_threshold=10.0,
         trend_window_days=30,
-        direction="bearish",          # only want bearish
+        direction="bearish",
     )
     scanner = Scanner(db, config)
-    as_of_date = (base + timedelta(days=59)).isoformat()
+    as_of_date = (base + timedelta(days=159)).isoformat()
     results = scanner.scan(as_of_date)
 
     bull_signals = [r for r in results if r["ticker"] == "BULL"]
@@ -193,11 +194,10 @@ def test_flat_stock_produces_no_signal(db):
     base = date(2024, 1, 1)
     db.upsert_stock(_stock("FLAT"))
 
-    # Flat prices — no crossover possible
-    closes = [5.0] * 60
+    closes = [5.0] * 160
     db.insert_daily_prices(_make_prices("FLAT", base, closes))
 
-    eps_date = (base + timedelta(days=30)).isoformat()
+    eps_date = (base + timedelta(days=80)).isoformat()
     db.insert_earnings([{
         "ticker": "FLAT",
         "report_date": eps_date,
@@ -212,13 +212,13 @@ def test_flat_stock_produces_no_signal(db):
         max_price=20.0,
         min_market_cap=50_000_000,
         max_market_cap=2_000_000_000,
-        ma_periods=[20],
+        ma_crossover_pairs=[(20, 50)],
         eps_change_threshold=10.0,
         trend_window_days=30,
         direction="both",
     )
     scanner = Scanner(db, config)
-    as_of_date = (base + timedelta(days=59)).isoformat()
+    as_of_date = (base + timedelta(days=159)).isoformat()
     results = scanner.scan(as_of_date)
 
     assert results == [], f"Expected no signals for FLAT stock, got: {results}"

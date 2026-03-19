@@ -2,6 +2,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -20,6 +21,55 @@ def get_db() -> Database:
     db = Database(DB_PATH)
     db.initialize()
     return db
+
+
+# --- Trendline helpers ---
+
+def find_swing_points(df: pd.DataFrame, lookback: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Find swing highs and lows using a rolling window comparison."""
+    highs = []
+    lows = []
+    for i in range(lookback, len(df) - lookback):
+        window_high = df["high"].iloc[i - lookback : i + lookback + 1]
+        if df["high"].iloc[i] == window_high.max():
+            highs.append(i)
+        window_low = df["low"].iloc[i - lookback : i + lookback + 1]
+        if df["low"].iloc[i] == window_low.min():
+            lows.append(i)
+    return df.iloc[highs] if highs else pd.DataFrame(), df.iloc[lows] if lows else pd.DataFrame()
+
+
+def build_trendline(points: pd.DataFrame, price_col: str, df: pd.DataFrame):
+    """Fit a line through the last 2+ swing points and extend to chart end."""
+    if len(points) < 2:
+        return None
+    # Use last 2 swing points
+    pts = points.tail(2)
+    x_idx = np.array([df.index.get_loc(i) if i in df.index else 0 for i in pts.index])
+    if x_idx[1] == x_idx[0]:
+        return None
+    y_vals = pts[price_col].values.astype(float)
+    slope = (y_vals[1] - y_vals[0]) / (x_idx[1] - x_idx[0])
+    intercept = y_vals[0] - slope * x_idx[0]
+    # Extend from first swing point to end of chart
+    x_range = np.arange(x_idx[0], len(df))
+    y_range = slope * x_range + intercept
+    dates = df["date"].iloc[x_range]
+    return dates, y_range
+
+
+def build_regression_channel(df: pd.DataFrame, window: int = 90, num_std: float = 1.5):
+    """Fit a linear regression on the last `window` closes with ±std bands."""
+    subset = df.tail(window).copy()
+    if len(subset) < 20:
+        return None
+    x = np.arange(len(subset))
+    y = subset["close"].values.astype(float)
+    coeffs = np.polyfit(x, y, 1)
+    fit = np.polyval(coeffs, x)
+    residuals = y - fit
+    std = residuals.std()
+    return subset["date"], fit, fit + num_std * std, fit - num_std * std
 
 
 db = get_db()
@@ -50,6 +100,23 @@ earnings = db.get_earnings(ticker)
 end_date = datetime.today().strftime("%Y-%m-%d")
 start_date = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
 prices_raw = db.get_daily_prices(ticker, start_date, end_date)
+
+# --- Sidebar: chart overlays ---
+with st.sidebar:
+    st.divider()
+    st.subheader("Chart Overlays")
+    show_ma = st.checkbox("Moving Averages", value=True)
+    show_trendlines = st.checkbox("Support / Resistance", value=True)
+    show_regression = st.checkbox("Regression Channel", value=False)
+    if show_trendlines:
+        swing_lookback = st.slider("Swing Lookback (bars)", min_value=3, max_value=15, value=5)
+    else:
+        swing_lookback = 5
+    if show_regression:
+        reg_window = st.slider("Regression Window (days)", min_value=30, max_value=250, value=90)
+        reg_std = st.slider("Channel Width (std dev)", min_value=1.0, max_value=3.0, value=1.5, step=0.25)
+    else:
+        reg_window, reg_std = 90, 1.5
 
 # --- Sidebar stats ---
 with st.sidebar:
@@ -114,13 +181,6 @@ df = pd.DataFrame(prices_raw)
 df["date"] = pd.to_datetime(df["date"])
 df = df.sort_values("date").reset_index(drop=True)
 
-# --- Moving averages ---
-ma_configs = [
-    (20, "SMA 20", "orange", "dash"),
-    (50, "SMA 50", "green", "dash"),
-    (200, "SMA 200", "red", "dash"),
-]
-
 # --- Build chart ---
 fig = make_subplots(
     rows=2,
@@ -130,13 +190,17 @@ fig = make_subplots(
     vertical_spacing=0.03,
 )
 
-# Price line
+# Candlestick chart
 fig.add_trace(
-    go.Scatter(
+    go.Candlestick(
         x=df["date"],
-        y=df["close"],
+        open=df["open"],
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
         name="Price",
-        line=dict(color="royalblue", width=2),
+        increasing_line_color="#26a69a",
+        decreasing_line_color="#ef5350",
         showlegend=True,
     ),
     row=1,
@@ -144,16 +208,101 @@ fig.add_trace(
 )
 
 # MA overlays
-for period, label, color, dash in ma_configs:
-    if len(df) >= period:
-        df[f"sma_{period}"] = df["close"].rolling(window=period).mean()
+if show_ma:
+    ma_configs = [
+        (20, "SMA 20", "orange", "dash"),
+        (50, "SMA 50", "green", "dash"),
+        (200, "SMA 200", "red", "dash"),
+    ]
+    for period, label, color, dash in ma_configs:
+        if len(df) >= period:
+            df[f"sma_{period}"] = df["close"].rolling(window=period).mean()
+            fig.add_trace(
+                go.Scatter(
+                    x=df["date"],
+                    y=df[f"sma_{period}"],
+                    name=label,
+                    line=dict(color=color, width=1.5, dash=dash),
+                    showlegend=True,
+                ),
+                row=1,
+                col=1,
+            )
+
+# Swing-based support/resistance trendlines
+if show_trendlines:
+    swing_highs, swing_lows = find_swing_points(df, lookback=swing_lookback)
+
+    # Resistance line (swing highs)
+    if len(swing_highs) >= 2:
+        result = build_trendline(swing_highs, "high", df)
+        if result is not None:
+            dates, y_vals = result
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=y_vals,
+                    name="Resistance",
+                    line=dict(color="red", width=1.5, dash="dashdot"),
+                    showlegend=True,
+                ),
+                row=1,
+                col=1,
+            )
+
+    # Support line (swing lows)
+    if len(swing_lows) >= 2:
+        result = build_trendline(swing_lows, "low", df)
+        if result is not None:
+            dates, y_vals = result
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=y_vals,
+                    name="Support",
+                    line=dict(color="cyan", width=1.5, dash="dashdot"),
+                    showlegend=True,
+                ),
+                row=1,
+                col=1,
+            )
+
+# Linear regression channel
+if show_regression:
+    reg_result = build_regression_channel(df, window=reg_window, num_std=reg_std)
+    if reg_result is not None:
+        reg_dates, reg_fit, reg_upper, reg_lower = reg_result
         fig.add_trace(
             go.Scatter(
-                x=df["date"],
-                y=df[f"sma_{period}"],
-                name=label,
-                line=dict(color=color, width=1.5, dash=dash),
+                x=reg_dates,
+                y=reg_fit,
+                name="Regression",
+                line=dict(color="yellow", width=1.5),
                 showlegend=True,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=reg_dates,
+                y=reg_upper,
+                name="Upper Band",
+                line=dict(color="yellow", width=1, dash="dot"),
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=reg_dates,
+                y=reg_lower,
+                name="Lower Band",
+                line=dict(color="yellow", width=1, dash="dot"),
+                fill="tonexty",
+                fillcolor="rgba(255, 255, 0, 0.05)",
+                showlegend=False,
             ),
             row=1,
             col=1,
@@ -175,12 +324,22 @@ for earn in earnings:
     line_color = "green" if (chg is not None and chg >= 0) else "red"
     chg_label = f"+{chg:.1f}%" if (chg is not None and chg >= 0) else (f"{chg:.1f}%" if chg is not None else "N/A")
 
-    fig.add_vline(
-        x=rd.strftime("%Y-%m-%d"),
+    fig.add_shape(
+        type="line",
+        x0=rd, x1=rd, y0=0, y1=1,
+        yref="y domain",
         line=dict(color=line_color, width=1, dash="dot"),
-        annotation_text=f"EPS: {chg_label}",
-        annotation_position="top",
-        annotation=dict(font_size=10, font_color=line_color),
+        row=1,
+        col=1,
+    )
+    fig.add_annotation(
+        x=rd,
+        y=1,
+        yref="y domain",
+        text=f"EPS: {chg_label}",
+        showarrow=False,
+        font=dict(size=10, color=line_color),
+        yanchor="bottom",
         row=1,
         col=1,
     )
@@ -189,36 +348,52 @@ for earn in earnings:
 if signal_data:
     try:
         trend_date = pd.to_datetime(signal_data.get("trend_change_date"))
-        ma_period = signal_data.get("ma_period", "?")
+        fast_ma = signal_data.get("fast_ma", "?")
+        slow_ma = signal_data.get("slow_ma", "?")
         direction = signal_data.get("signal_type", "Cross")
-        fig.add_vline(
-            x=trend_date.strftime("%Y-%m-%d"),
+        fig.add_shape(
+            type="line",
+            x0=trend_date, x1=trend_date, y0=0, y1=1,
+            yref="y domain",
             line=dict(color="purple", width=2, dash="solid"),
-            annotation_text=f"MA{ma_period} Cross ({direction})",
-            annotation_position="top",
-            annotation=dict(font_size=11, font_color="purple"),
+            row=1,
+            col=1,
+        )
+        fig.add_annotation(
+            x=trend_date,
+            y=1,
+            yref="y domain",
+            text=f"SMA{fast_ma}/{slow_ma} Cross ({direction})",
+            showarrow=False,
+            font=dict(size=11, color="purple"),
+            yanchor="bottom",
             row=1,
             col=1,
         )
     except Exception:
         pass
 
-# Volume bars
+# Volume bars — color by up/down day
+vol_colors = [
+    "#26a69a" if c >= o else "#ef5350"
+    for c, o in zip(df["close"], df["open"])
+]
 fig.add_trace(
     go.Bar(
         x=df["date"],
         y=df["volume"],
         name="Volume",
-        marker=dict(color="gray", opacity=0.3),
-        showlegend=True,
+        marker=dict(color=vol_colors, opacity=0.4),
+        showlegend=False,
     ),
     row=2,
     col=1,
 )
 
 fig.update_layout(
-    height=600,
+    height=650,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    xaxis_rangeslider_visible=False,
     xaxis2=dict(rangeslider=dict(visible=False)),
     margin=dict(l=0, r=0, t=40, b=0),
     plot_bgcolor="rgba(0,0,0,0)",
