@@ -7,10 +7,11 @@ from core.providers.base import DataProvider
 
 logger = logging.getLogger(__name__)
 
-# Validated tickers ($1-$20, confirmed active March 2026)
-# Covers biotech, tech, EV/energy, fintech, space, consumer, cannabis
+# Validated tickers ($1-$50, confirmed active March 2026)
+# Covers biotech, tech, EV/energy, fintech, space, consumer, cannabis, ADRs
 # get_small_cap_universe() dynamically filters by current price range
 SMALL_CAP_UNIVERSE = [
+    # ── Original universe (83 tickers, mostly $1-$20) ──
     "ACB", "AGEN", "AI", "ALEC", "ARBK", "AREC", "ARRY", "BBAI",
     "BCRX", "BIRD", "BMBL", "BRZE", "BTBT", "CGC", "CHPT", "CLF",
     "CLOV", "COUR", "CRMD", "DARE", "DNA", "DPRO", "EOLS", "EVGO",
@@ -22,6 +23,24 @@ SMALL_CAP_UNIVERSE = [
     "SAVA", "SKIN", "SKLZ", "SMPL", "SNDL", "SOFI", "SPCE", "SPT",
     "STEM", "TASK", "TLRY", "UWMC", "VUZI", "WEAV", "WKHS", "XNCR",
     "XPOF", "YEXT", "ZNTL",
+    # ── Expansion: ADRs (Chinese/Asian tech, LatAm, European) ──
+    "ABEV", "BILI", "FINV", "GGB", "GOTU", "GRAB", "JD", "LI",
+    "LSPD", "LX", "NIO", "NU", "PAGS", "PHI", "SID", "STNE",
+    "TAL", "TEVA", "TIGR", "TME", "TUYA", "UGP", "VALE", "VNET",
+    "VTRS", "WB", "XPEV", "YMM", "ZTO",
+    # ── Expansion: US small/mid caps ($5-$50) ──
+    "AFRM", "APPS", "ASAN", "BILL", "CARG", "CHWY", "CLSK", "COMP",
+    "CRNC", "CRSP", "DKNG", "DOCS", "ENPH", "ENVX", "EVTL", "FLNC",
+    "GDRX", "GRPN", "HIMS", "IONQ", "JOBY", "LCID", "MGNI", "MQ",
+    "NNDM", "NRDS", "OUST", "PATH", "PERI", "PRCH", "PSNY", "RNW",
+    "RPAY", "SDGR", "SEDG", "SHLS", "SPWR", "TALK", "TOST", "TPVG",
+    "U", "UPST", "UPWK", "VLY", "WULF", "XERS", "XOS", "ZETA",
+    # ── Expansion: Biotech/pharma ──
+    "ACAD", "AGIO", "ALKS", "AMRX", "APLS", "ARVN", "BEAM", "CRBU",
+    "DNLI", "EDIT", "FOLD", "LEGN", "NRIX", "NUVB", "PRTA", "RARE",
+    "REPL", "RLAY", "ROIV", "TGTX", "VCNX",
+    # ── Expansion: Clean energy / EV ──
+    "AES", "BLDP",
 ]
 
 

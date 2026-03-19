@@ -33,10 +33,11 @@ requires two ingredients:
 
 **1. EPS Filter**
 
-Each earnings report is checked for a large enough move. The absolute
-percentage change between the reported EPS and the prior quarter's EPS must
-exceed the configured threshold (default **10 %**). Both positive and negative
-EPS surprises qualify.
+Each earnings report is checked for a large enough move. The percentage change
+between the reported EPS and the analyst estimate (consensus) must exceed the
+configured threshold (default **10 %**). When analyst estimates are unavailable,
+the scanner falls back to quarter-over-quarter EPS comparison. Both positive
+and negative EPS surprises qualify.
 
 **2. MA Crossover Detection**
 
@@ -53,11 +54,26 @@ The default MA pairs are **20/50** and **50/200** (simple moving averages).
 Both pairs are checked independently, so a single EPS event can produce
 multiple signals.
 
-**3. Configurable Parameters**
+**3. Stock Universe**
+
+The scanner monitors **183 tickers** across multiple categories:
+
+| Category | Count | Examples |
+|----------|-------|---------|
+| US small caps ($1--$20) | 83 | SOFI, PLUG, MARA, RIOT, LUNR |
+| US-traded ADRs | 29 | NIO, JD, VALE, NU, GRAB, XPEV |
+| US small/mid caps ($5--$50) | 48 | DKNG, HIMS, IONQ, UPST, CHWY |
+| Biotech / pharma | 21 | BEAM, CRSP, TGTX, LEGN, EDIT |
+| Clean energy / EV | 2 | AES, BLDP |
+
+The universe is dynamically filtered at scan time by current price,
+so only tickers trading within the configured price range are included.
+
+**4. Configurable Parameters**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| Price range | $1 -- $20 | Stock price filter |
+| Price range | $1 -- $50 | Stock price filter |
 | Market cap | $50M -- $10B | Market cap filter |
 | MA pairs | 20/50, 50/200 | Fast / slow SMA periods |
 | EPS threshold | 10% | Minimum absolute EPS change |

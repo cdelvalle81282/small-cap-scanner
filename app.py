@@ -57,7 +57,7 @@ if st.button("Run Pipeline", type="primary"):
 
     provider = YFinanceProvider()
     pipeline = Pipeline(db=db, provider=provider)
-    tickers = provider.get_small_cap_universe(1.0, 20.0)
+    tickers = provider.get_small_cap_universe(1.0, 50.0)
     total = len(tickers)
 
     progress = st.progress(0, text="Starting pipeline...")

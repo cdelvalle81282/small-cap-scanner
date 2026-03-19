@@ -17,7 +17,7 @@ class Pipeline:
         self.batch_delay = batch_delay
 
     def run(self, start_date: str, end_date: str) -> None:
-        tickers = self.provider.get_small_cap_universe(1.0, 20.0)
+        tickers = self.provider.get_small_cap_universe(1.0, 50.0)
         logger.info("Universe contains %d tickers", len(tickers))
 
         for i, ticker in enumerate(tickers):

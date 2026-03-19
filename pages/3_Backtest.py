@@ -59,7 +59,7 @@ with st.sidebar:
     start_date = st.date_input("Start Date", value=date(2022, 1, 1))
     end_date = st.date_input("End Date", value=date(2026, 3, 17))
     min_price = st.number_input("Min Price ($)", value=1.0, min_value=0.01, step=0.5)
-    max_price = st.number_input("Max Price ($)", value=20.0, min_value=0.01, step=1.0)
+    max_price = st.number_input("Max Price ($)", value=50.0, min_value=0.01, step=1.0)
     direction = st.selectbox("Direction", options=["both", "bullish", "bearish"], index=0)
 
 st.title("Backtest")

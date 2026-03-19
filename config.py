@@ -6,7 +6,7 @@ DB_PATH = Path(__file__).parent / "data" / "scanner.db"
 @dataclass
 class ScannerConfig:
     min_price: float = 1.0
-    max_price: float = 20.0
+    max_price: float = 50.0
     min_market_cap: float = 50_000_000       # $50M
     max_market_cap: float = 10_000_000_000   # $10B
     ma_crossover_pairs: list[tuple[int, int]] = field(

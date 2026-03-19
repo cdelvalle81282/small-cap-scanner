@@ -33,7 +33,7 @@ MA_PAIR_OPTIONS = {
 with st.sidebar:
     st.header("Scan Parameters")
     min_price = st.number_input("Min Price ($)", value=1.0, min_value=0.01, step=0.5)
-    max_price = st.number_input("Max Price ($)", value=20.0, min_value=0.01, step=1.0)
+    max_price = st.number_input("Max Price ($)", value=50.0, min_value=0.01, step=1.0)
     ma_pair_label = st.selectbox("MA Crossover", options=list(MA_PAIR_OPTIONS.keys()), index=0)
     eps_threshold = st.slider("Min EPS Change %", min_value=1, max_value=100, value=10)
     trend_window = st.slider("Trend Window (days)", min_value=5, max_value=90, value=30)
