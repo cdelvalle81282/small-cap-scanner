@@ -130,7 +130,46 @@ that horizon records the stop-loss return instead of waiting.
 | Avg Winner / Loser | Mean return of winning / losing trades |
 """)
 
-# ── Section 3: Last Data Sync ─────────────────────────────────────────────
+# ── Section 3: Options Strategy (Alternate) ───────────────────────────────
+
+st.header("Options Strategy (Alternate)")
+
+st.markdown("""
+Extensive backtesting revealed an **extreme winner/loser asymmetry** in
+the optimized signal set. This makes ATM call options a compelling
+alternate strategy.
+
+**Winner / Loser Asymmetry**
+
+| Metric | Winners | Losers |
+|--------|---------|--------|
+| Avg Stock Return | +36 to +44% | -3.4% |
+| Avg Hold Days | 4 - 7 | 1 - 3 |
+| Exit Reason | Horizon (held to target) | Stop loss |
+
+**Optimized Signal Filters**
+
+1. Bullish direction only
+2. Positive EPS change (upside surprise)
+3. EPS magnitude < 100%
+4. > 10 days between EPS report and MA crossover
+5. Avg daily dollar volume >= $500K
+6. Positive 20-day momentum *(optional, strict mode)*
+7. Positive SMA20 slope *(optional, strict mode)*
+
+**Options Execution**
+
+- Buy **ATM call options** with **2-week expiry** when signal triggers
+- Exit when stock trailing stop fires (close < prev day low on Day 1,
+  or close < 0.5x ATR trail on Day 2+)
+- 2-week expiry preferred: higher gamma captures fast winners;
+  winners resolve in 4-7 days
+
+See the **Options Strategy** page for full backtest results and live
+signal scanner.
+""")
+
+# ── Section 4: Last Data Sync ─────────────────────────────────────────────
 
 st.header("Last Data Sync")
 
