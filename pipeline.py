@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import time
 
 from config import DB_PATH
@@ -66,11 +67,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the small-cap data pipeline")
     parser.add_argument("--start", default="2021-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-03-17", help="End date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--provider", default="yfinance", choices=["yfinance", "polygon"],
+        help="Data provider (default: yfinance)",
+    )
     args = parser.parse_args()
 
     db = Database(DB_PATH)
     db.initialize()
-    provider = YFinanceProvider()
+
+    if args.provider == "polygon":
+        from core.providers.polygon_provider import PolygonProvider
+        api_key = os.environ.get("POLYGON_API_KEY")
+        if not api_key:
+            raise SystemExit("POLYGON_API_KEY environment variable not set")
+        provider: DataProvider = PolygonProvider(api_key)
+    else:
+        provider = YFinanceProvider()
+
     pipeline = Pipeline(db, provider)
     pipeline.run(args.start, args.end)
 
