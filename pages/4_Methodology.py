@@ -56,7 +56,7 @@ multiple signals.
 
 **3. Stock Universe**
 
-The scanner monitors **183 tickers** across multiple categories:
+The scanner monitors **500 tickers** across multiple categories:
 
 | Category | Count | Examples |
 |----------|-------|---------|
@@ -65,6 +65,12 @@ The scanner monitors **183 tickers** across multiple categories:
 | US small/mid caps ($5--$50) | 48 | DKNG, HIMS, IONQ, UPST, CHWY |
 | Biotech / pharma | 21 | BEAM, CRSP, TGTX, LEGN, EDIT |
 | Clean energy / EV | 2 | AES, BLDP |
+| Screened US equities ($1.2B--$2.0B mcap) | 317 | ATKR, CBZ, GLOB, PENN, WEN |
+
+The expanded universe was built by screening Yahoo Finance for US-listed
+equities with market caps between $50M and $2B, excluding preferred stocks,
+warrants, units, closed-end funds, and SPACs. The top 317 by market cap
+were added in March 2026.
 
 The universe is dynamically filtered at scan time by current price,
 so only tickers trading within the configured price range are included.

@@ -98,7 +98,7 @@ fundamentals = db.get_fundamentals(ticker)
 earnings = db.get_earnings(ticker)
 
 end_date = datetime.today().strftime("%Y-%m-%d")
-start_date = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+start_date = "2020-01-01"
 prices_raw = db.get_daily_prices(ticker, start_date, end_date)
 
 # --- Sidebar: chart overlays ---
@@ -404,6 +404,88 @@ fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
 
 st.plotly_chart(fig, use_container_width=True)
+
+# --- AI Chart Analysis ---
+if signal_data:
+    st.divider()
+    st.subheader("AI Chart Analysis")
+
+    cache_key = f"ai_analysis_{ticker}_{signal_data.get('trend_change_date')}"
+
+    def render_analysis(result: dict) -> None:
+        # Extracted price levels
+        levels = result.get("levels", [])
+        if levels:
+            st.subheader("Key Price Levels")
+            levels_df = pd.DataFrame(levels)[["type", "price", "label"]]
+            levels_df.columns = ["Type", "Price", "Significance"]
+            levels_df["Price"] = levels_df["Price"].apply(lambda p: f"${p:.2f}")
+            st.dataframe(levels_df, hide_index=True, use_container_width=True)
+
+        trend_break = result.get("trend_break_condition")
+        if trend_break:
+            st.info(f"**Trend break condition:** {trend_break}")
+
+        st.markdown(result.get("text", ""))
+
+    if cache_key in st.session_state:
+        result = st.session_state[cache_key]
+        render_analysis(result)
+
+        # Watchlist button
+        import json as _json
+        from datetime import timedelta as _timedelta
+        from core.database import Database as _Database
+
+        _db = _Database(DB_PATH)
+        _db.initialize()
+        existing = _db.get_watchlist_entry(ticker)
+
+        if existing:
+            st.success(f"On watchlist — expires {existing['expiry_date']}")
+            if st.button("Remove from Watchlist"):
+                _db.remove_from_watchlist(existing["id"])
+                st.rerun()
+        else:
+            if st.button("Add to Watchlist (30-day monitoring)", type="primary"):
+                eps_date = signal_data.get("eps_change_date", "")
+                if eps_date:
+                    expiry = (datetime.fromisoformat(eps_date) + _timedelta(days=30)).strftime("%Y-%m-%d")
+                else:
+                    expiry = ""
+                entry = {
+                    "ticker": ticker,
+                    "signal_type": signal_data.get("signal_type", ""),
+                    "eps_change_pct": signal_data.get("eps_change_pct"),
+                    "eps_date": eps_date,
+                    "signal_date": signal_data.get("trend_change_date", ""),
+                    "fast_ma": signal_data.get("fast_ma"),
+                    "slow_ma": signal_data.get("slow_ma"),
+                    "levels_json": _json.dumps(result.get("levels", [])),
+                    "trend_break_price": result.get("trend_break_price"),
+                    "trend_break_condition": result.get("trend_break_condition", ""),
+                    "ai_analysis": result.get("text", ""),
+                    "expiry_date": expiry,
+                    "added_date": datetime.now().strftime("%Y-%m-%d"),
+                }
+                _db.add_to_watchlist(entry)
+                st.success(f"Added {ticker} to watchlist until {expiry}")
+                st.rerun()
+    else:
+        if st.button("Analyze Chart with AI", type="primary"):
+            from core.chart_analyzer import analyze_chart, build_signal_chart
+
+            with st.spinner("Building signal chart and analyzing with Claude..."):
+                try:
+                    signal_fig = build_signal_chart(df, signal_data, earnings)
+                    result = analyze_chart(signal_fig, signal_data)
+                    st.session_state[cache_key] = result
+                    render_analysis(result)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error(f"Analysis failed: {e}")
 
 # --- Earnings history table ---
 if earnings:

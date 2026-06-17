@@ -36,6 +36,14 @@ if stock_count == 0:
 else:
     st.success("Database loaded. Use the sidebar to navigate.")
 
+# Alert banner
+unread_alerts = db.get_unread_alerts()
+if unread_alerts:
+    st.error(
+        f"**{len(unread_alerts)} price alert{'s' if len(unread_alerts) > 1 else ''}** — "
+        f"[View in Watchlist](/Watchlist)"
+    )
+
 # Pipeline runner
 st.divider()
 st.subheader("Data Pipeline")

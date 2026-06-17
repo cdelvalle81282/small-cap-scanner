@@ -1,0 +1,34 @@
+name: Daily Signal Scan
+
+on:
+  schedule:
+    # 9:35 AM ET weekdays (13:35 UTC) — just after market open
+    # Also runs at 4:35 PM ET (20:35 UTC) to catch intraday crossovers
+    - cron: "35 13 * * 1-5"
+    - cron: "35 20 * * 1-5"
+  workflow_dispatch:  # allow manual trigger from GitHub Actions UI
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install yfinance pandas python-dotenv
+
+      - name: Run scanner and notify
+        env:
+          SMTP_USERNAME:    ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD:    ${{ secrets.SMTP_PASSWORD }}
+          SMTP_TO:          ${{ secrets.SMTP_TO }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python scan_and_notify.py
