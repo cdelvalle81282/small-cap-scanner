@@ -124,6 +124,46 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_watchlist_active
                     ON signal_watchlist (active, expiry_date);
+
+                CREATE TABLE IF NOT EXISTS signal_alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    alert_date TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    fast_ma INTEGER,
+                    slow_ma INTEGER,
+                    eps_change_pct REAL,
+                    eps_date TEXT,
+                    cross_date TEXT,
+                    days_between INTEGER,
+                    close_price REAL,
+                    UNIQUE(ticker, alert_date, signal_type, fast_ma, slow_ma)
+                );
+
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    entry_date TEXT,
+                    entry_price REAL,
+                    shares REAL,
+                    stop_price REAL,
+                    target_price REAL,
+                    exit_date TEXT,
+                    exit_price REAL,
+                    notes TEXT,
+                    signal_type TEXT,
+                    eps_change_pct REAL,
+                    eps_date TEXT,
+                    added_date TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_signal_alerts_date
+                    ON signal_alerts (alert_date DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_trades_status
+                    ON trades (status);
             """)
 
     def get_tables(self) -> list[str]:
@@ -422,3 +462,79 @@ class Database:
                 (watchlist_id, level_price),
             ).fetchone()
         return row is not None
+
+    # --- signal_alerts ---
+
+    def save_signal_alert(self, alert: dict) -> None:
+        """Insert a signal alert, ignore if duplicate."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO signal_alerts
+                    (ticker, alert_date, signal_type, fast_ma, slow_ma,
+                     eps_change_pct, eps_date, cross_date, days_between, close_price)
+                VALUES
+                    (:ticker, :alert_date, :signal_type, :fast_ma, :slow_ma,
+                     :eps_change_pct, :eps_date, :cross_date, :days_between, :close_price)
+                """,
+                alert,
+            )
+
+    def get_signal_alerts(self, start_date: str, end_date: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM signal_alerts
+                WHERE alert_date >= ? AND alert_date <= ?
+                ORDER BY alert_date DESC, ticker
+                """,
+                (start_date, end_date),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # --- trades ---
+
+    def add_trade(self, trade: dict) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO trades
+                    (ticker, direction, status, entry_date, entry_price, shares,
+                     stop_price, target_price, exit_date, exit_price, notes,
+                     signal_type, eps_change_pct, eps_date, added_date)
+                VALUES
+                    (:ticker, :direction, :status, :entry_date, :entry_price, :shares,
+                     :stop_price, :target_price, :exit_date, :exit_price, :notes,
+                     :signal_type, :eps_change_pct, :eps_date, :added_date)
+                """,
+                trade,
+            )
+            return cur.lastrowid
+
+    def get_trades(self, status: str | None = None) -> list[dict]:
+        with self._connect() as conn:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM trades WHERE status = ? ORDER BY entry_date DESC",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM trades ORDER BY added_date DESC"
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def close_trade(self, trade_id: int, exit_date: str, exit_price: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE trades
+                SET status = 'closed', exit_date = ?, exit_price = ?
+                WHERE id = ?
+                """,
+                (exit_date, exit_price, trade_id),
+            )
+
+    def delete_trade(self, trade_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))

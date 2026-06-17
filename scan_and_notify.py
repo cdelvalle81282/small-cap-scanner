@@ -25,6 +25,8 @@ import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from config import DB_PATH
+from core.database import Database
 from core.providers.yfinance_provider import SMALL_CAP_UNIVERSE
 
 try:
@@ -275,6 +277,25 @@ def run() -> None:
                 f"  {arrow} {ticker} | SMA{s['fast_ma']}/{s['slow_ma']} {s['direction']} | "
                 f"EPS {s['eps_change_pct']:+.1f}% | Cross {s['cross_date']}"
             )
+
+    # Persist to DB
+    db = Database(DB_PATH)
+    db.initialize()
+    for ticker, sigs in signals_by_ticker.items():
+        for s in sigs:
+            db.save_signal_alert({
+                "ticker": ticker,
+                "alert_date": today.strftime("%Y-%m-%d"),
+                "signal_type": s["direction"],
+                "fast_ma": s["fast_ma"],
+                "slow_ma": s["slow_ma"],
+                "eps_change_pct": s["eps_change_pct"],
+                "eps_date": s["eps_date"],
+                "cross_date": s["cross_date"],
+                "days_between": s["days_between"],
+                "close_price": s["close"],
+            })
+    print("Signals saved to database.")
 
     send_email(
         subject=f"Small Cap Scanner: {total} new signal(s) — {today.strftime('%Y-%m-%d')}",
