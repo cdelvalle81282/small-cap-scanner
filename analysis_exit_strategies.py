@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import DB_PATH, ScannerConfig, BacktestConfig
 from core.database import Database
 from core.backtest import Backtester
-from analysis_winners_losers import enrich_deep, filt_c17_both as filt_c17
+from analysis_winners_losers import enrich_deep, filt_eps_trend as filt_c17
 
 MAX_HOLD = 30          # trading days cap for all strategies
 LOOKBACK = 120         # calendar days of history before signal for MA seeding

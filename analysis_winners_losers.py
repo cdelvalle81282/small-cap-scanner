@@ -382,6 +382,16 @@ def filt_c17_both(signals):
             and s["days_between"] > 10]
 
 
+def filt_eps_trend(signals):
+    """Trade the MA crossover direction regardless of EPS direction.
+    EPS is just the catalyst — we trade whichever way the trend breaks.
+    Requires: liquidity >= $500K avg dollar vol, days_between > 10."""
+    return [s for s in signals
+            if s.get("avg_dollar_vol", 0) >= 500_000
+            and s["days_between"] > 10
+            and s.get("eps_change_pct") is not None]
+
+
 def compare_groups(winners, losers, field, label=None):
     label = label or field
     w_vals = [s[field] for s in winners if s[field] is not None and not (isinstance(s[field], float) and np.isnan(s[field]))]

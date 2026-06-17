@@ -13,7 +13,7 @@ from core.database import Database
 st.set_page_config(page_title="Small Cap Scanner", page_icon="📊", layout="wide")
 st.title("Small Cap EPS + Trend Scanner")
 st.markdown(
-    "Identifies small cap stocks ($1-$20) where a moving average trend change occurs "
+    "Identifies small cap stocks ($1-$50) where a moving average trend change occurs "
     "within a configurable window of an earnings-per-share change."
 )
 
@@ -41,7 +41,7 @@ unread_alerts = db.get_unread_alerts()
 if unread_alerts:
     st.error(
         f"**{len(unread_alerts)} price alert{'s' if len(unread_alerts) > 1 else ''}** — "
-        f"[View in Watchlist](/Watchlist)"
+        f"[View in Tracking](/Tracking)"
     )
 
 # Pipeline runner
@@ -56,7 +56,7 @@ with col1:
     )
 with col2:
     pipeline_end = st.date_input(
-        "Pipeline End", value=pd.to_datetime("2026-03-17"), key="pipe_end"
+        "Pipeline End", value=pd.Timestamp.today(), key="pipe_end"
     )
 
 if st.button("Run Pipeline", type="primary"):

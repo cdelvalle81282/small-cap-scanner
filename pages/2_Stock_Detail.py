@@ -101,22 +101,12 @@ end_date = datetime.today().strftime("%Y-%m-%d")
 start_date = "2020-01-01"
 prices_raw = db.get_daily_prices(ticker, start_date, end_date)
 
-# --- Sidebar: chart overlays ---
-with st.sidebar:
-    st.divider()
-    st.subheader("Chart Overlays")
-    show_ma = st.checkbox("Moving Averages", value=True)
-    show_trendlines = st.checkbox("Support / Resistance", value=True)
-    show_regression = st.checkbox("Regression Channel", value=False)
-    if show_trendlines:
-        swing_lookback = st.slider("Swing Lookback (bars)", min_value=3, max_value=15, value=5)
-    else:
-        swing_lookback = 5
-    if show_regression:
-        reg_window = st.slider("Regression Window (days)", min_value=30, max_value=250, value=90)
-        reg_std = st.slider("Channel Width (std dev)", min_value=1.0, max_value=3.0, value=1.5, step=0.25)
-    else:
-        reg_window, reg_std = 90, 1.5
+# Chart overlay defaults (controls only rendered after data is confirmed)
+show_ma = True
+show_trendlines = True
+show_regression = False
+swing_lookback = 5
+reg_window, reg_std = 90, 1.5
 
 # --- Sidebar stats ---
 with st.sidebar:
@@ -174,12 +164,29 @@ with st.sidebar:
 st.title(f"{ticker}" + (f" — {stock['name']}" if stock and stock.get("name") else ""))
 
 if not prices_raw:
-    st.warning(f"No price data available for {ticker} in the last year.")
+    st.warning(f"No price data available for {ticker}. Run the pipeline to load data.")
     st.stop()
 
 df = pd.DataFrame(prices_raw)
 df["date"] = pd.to_datetime(df["date"])
 df = df.sort_values("date").reset_index(drop=True)
+
+# --- Sidebar: chart overlays (only shown when data exists) ---
+with st.sidebar:
+    st.divider()
+    st.subheader("Chart Overlays")
+    show_ma = st.checkbox("Moving Averages", value=True)
+    show_trendlines = st.checkbox("Support / Resistance", value=True)
+    show_regression = st.checkbox("Regression Channel", value=False)
+    if show_trendlines:
+        swing_lookback = st.slider("Swing Lookback (bars)", min_value=3, max_value=15, value=5)
+    else:
+        swing_lookback = 5
+    if show_regression:
+        reg_window = st.slider("Regression Window (days)", min_value=30, max_value=250, value=90)
+        reg_std = st.slider("Channel Width (std dev)", min_value=1.0, max_value=3.0, value=1.5, step=0.25)
+    else:
+        reg_window, reg_std = 90, 1.5
 
 # --- Build chart ---
 fig = make_subplots(

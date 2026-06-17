@@ -22,6 +22,16 @@ def get_db() -> Database:
     return db
 
 
+@st.cache_data(ttl=30)
+def get_open_trades_cached() -> list[dict]:
+    return get_db().get_trades(status="open")
+
+
+@st.cache_data(ttl=30)
+def get_closed_trades_cached() -> list[dict]:
+    return get_db().get_trades(status="closed")
+
+
 @st.cache_data(ttl=300)
 def fetch_current_prices(tickers: tuple[str, ...]) -> dict[str, float]:
     if not tickers:
@@ -263,13 +273,13 @@ with tab_trades:
                     "eps_date": (prefill or {}).get("eps_date"),
                     "added_date": date.today().isoformat(),
                 })
+                st.cache_data.clear()
                 st.success(f"Added {direction_in} trade on {ticker_in}")
-                st.rerun()
             elif submitted:
                 st.error("Ticker and Entry Price are required.")
 
     st.subheader("Open Positions")
-    open_trades = db.get_trades(status="open")
+    open_trades = get_open_trades_cached()
 
     if open_trades:
         open_tickers = tuple(t["ticker"] for t in open_trades)
@@ -316,6 +326,7 @@ with tab_trades:
             if st.button("Close Trade", type="primary"):
                 if exit_price_in > 0:
                     db.close_trade(selected_id, exit_date_in.isoformat(), exit_price_in)
+                    st.cache_data.clear()
                     st.success("Trade closed.")
                     st.rerun()
                 else:
@@ -325,7 +336,7 @@ with tab_trades:
 
     st.divider()
     st.subheader("Closed Positions")
-    closed_trades = db.get_trades(status="closed")
+    closed_trades = get_closed_trades_cached()
 
     if closed_trades:
         closed_rows = []

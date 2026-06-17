@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import DB_PATH, ScannerConfig, BacktestConfig
 from core.database import Database
 from core.backtest import Backtester
-from analysis_winners_losers import enrich_deep, filt_c17_both as filt_c17
+from analysis_winners_losers import enrich_deep, filt_eps_trend as filt_c17
 from analysis_exit_strategies import get_price_df, compute_atr, trade_result
 
 MAX_HOLD = 30

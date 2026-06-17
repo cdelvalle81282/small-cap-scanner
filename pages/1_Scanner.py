@@ -51,8 +51,8 @@ with st.sidebar:
     direction = st.selectbox("Signal Direction", options=["both", "bullish", "bearish"], index=0)
     st.divider()
     sort_label = st.selectbox("Sort By", options=list(SORT_OPTIONS.keys()), index=0)
-
-run_scan = st.button("Run Scanner", type="primary")
+    st.divider()
+    run_scan = st.button("Run Scanner", type="primary", use_container_width=True)
 
 if run_scan:
     ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
