@@ -171,6 +171,19 @@ df = pd.DataFrame(prices_raw)
 df["date"] = pd.to_datetime(df["date"])
 df = df.sort_values("date").reset_index(drop=True)
 
+# --- Pre-load AI analysis from DB into session_state before chart renders ---
+_ai_cache_key = f"ai_analysis_{ticker}"
+if _ai_cache_key not in st.session_state:
+    _saved = db.get_ai_analysis(ticker)
+    if _saved:
+        st.session_state[_ai_cache_key] = {
+            "text": _saved.get("text", ""),
+            "levels": _saved.get("levels", []),
+            "trend_break_price": _saved.get("trend_break_price"),
+            "trend_break_condition": _saved.get("trend_break_condition", ""),
+            "_analysis_date": _saved.get("analysis_date", ""),
+        }
+
 # --- Sidebar: chart overlays (only shown when data exists) ---
 with st.sidebar:
     st.divider()
@@ -440,8 +453,9 @@ fig.update_xaxes(
 )
 
 # --- Overlay AI-identified support/resistance levels if analysis has been run ---
-for key, val in st.session_state.items():
-    if key.startswith(f"ai_analysis_{ticker}_") and isinstance(val, dict):
+_ai_val = st.session_state.get(f"ai_analysis_{ticker}")
+for val in [_ai_val] if _ai_val else []:
+    if isinstance(val, dict):
         levels = val.get("levels", [])
         trend_break = val.get("trend_break_price")
         trend_break_prices = {l.get("price") for l in levels}
@@ -487,19 +501,7 @@ st.subheader("AI Chart Analysis")
 import json as _json
 from datetime import timedelta as _timedelta
 
-cache_key = f"ai_analysis_{ticker}"
-
-# Load from DB into session_state if not already there
-if cache_key not in st.session_state:
-    saved = db.get_ai_analysis(ticker)
-    if saved:
-        st.session_state[cache_key] = {
-            "text": saved.get("text", ""),
-            "levels": saved.get("levels", []),
-            "trend_break_price": saved.get("trend_break_price"),
-            "trend_break_condition": saved.get("trend_break_condition", ""),
-            "_analysis_date": saved.get("analysis_date", ""),
-        }
+cache_key = _ai_cache_key
 
 
 def render_analysis(result: dict) -> None:
