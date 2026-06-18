@@ -481,54 +481,102 @@ for key, val in st.session_state.items():
 st.plotly_chart(fig, use_container_width=True)
 
 # --- AI Chart Analysis ---
-if signal_data:
-    st.divider()
-    st.subheader("AI Chart Analysis")
+st.divider()
+st.subheader("AI Chart Analysis")
 
-    cache_key = f"ai_analysis_{ticker}_{signal_data.get('trend_change_date')}"
+import json as _json
+from datetime import timedelta as _timedelta
 
-    def render_analysis(result: dict) -> None:
-        # Extracted price levels
-        levels = result.get("levels", [])
-        if levels:
-            st.subheader("Key Price Levels")
-            levels_df = pd.DataFrame(levels)[["type", "price", "label"]]
-            levels_df.columns = ["Type", "Price", "Significance"]
-            levels_df["Price"] = levels_df["Price"].apply(lambda p: f"${p:.2f}")
-            st.dataframe(levels_df, hide_index=True, use_container_width=True)
+cache_key = f"ai_analysis_{ticker}"
 
-        trend_break = result.get("trend_break_condition")
-        if trend_break:
-            st.info(f"**Trend break condition:** {trend_break}")
+# Load from DB into session_state if not already there
+if cache_key not in st.session_state:
+    saved = db.get_ai_analysis(ticker)
+    if saved:
+        st.session_state[cache_key] = {
+            "text": saved.get("text", ""),
+            "levels": saved.get("levels", []),
+            "trend_break_price": saved.get("trend_break_price"),
+            "trend_break_condition": saved.get("trend_break_condition", ""),
+            "_analysis_date": saved.get("analysis_date", ""),
+        }
 
-        st.markdown(result.get("text", ""))
 
-    if cache_key in st.session_state:
-        result = st.session_state[cache_key]
-        render_analysis(result)
+def render_analysis(result: dict) -> None:
+    levels = result.get("levels", [])
+    if levels:
+        st.subheader("Key Price Levels")
+        levels_df = pd.DataFrame(levels)[["type", "price", "label"]]
+        levels_df.columns = ["Type", "Price", "Significance"]
+        levels_df["Price"] = levels_df["Price"].apply(lambda p: f"${p:.2f}")
+        st.dataframe(levels_df, hide_index=True, use_container_width=True)
 
-        # Watchlist button
-        import json as _json
-        from datetime import timedelta as _timedelta
-        from core.database import Database as _Database
+    trend_break = result.get("trend_break_condition")
+    if trend_break:
+        st.info(f"**Trend break condition:** {trend_break}")
 
-        _db = _Database(DB_PATH)
-        _db.initialize()
-        existing = _db.get_watchlist_entry(ticker)
+    st.markdown(result.get("text", ""))
 
+
+def run_analysis() -> None:
+    from core.chart_analyzer import analyze_chart, build_signal_chart
+    with st.spinner("Building signal chart and analyzing with Claude..."):
+        try:
+            sig = signal_data or {
+                "ticker": ticker,
+                "signal_type": "bullish",
+                "eps_change_pct": None,
+                "eps_change_date": "",
+                "trend_change_date": df["date"].max().strftime("%Y-%m-%d"),
+                "days_between": 0,
+                "fast_ma": 20,
+                "slow_ma": 50,
+            }
+            signal_fig = build_signal_chart(df, sig, earnings)
+            result = analyze_chart(signal_fig, sig)
+            result["_analysis_date"] = datetime.now().strftime("%Y-%m-%d")
+            st.session_state[cache_key] = result
+            db.save_ai_analysis(
+                ticker, result,
+                signal_date=sig.get("trend_change_date"),
+            )
+            st.rerun()
+        except ValueError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Analysis failed: {e}")
+
+
+if cache_key in st.session_state:
+    result = st.session_state[cache_key]
+
+    analysis_date = result.get("_analysis_date", "")
+    col_hdr, col_rerun = st.columns([5, 1])
+    with col_hdr:
+        if analysis_date:
+            st.caption(f"Analysis from {analysis_date}")
+    with col_rerun:
+        if st.button("Re-run", help="Re-run AI analysis to get fresh chart read"):
+            run_analysis()
+
+    render_analysis(result)
+
+    # Watchlist button (only when we have a real signal)
+    if signal_data:
+        existing = db.get_watchlist_entry(ticker)
         if existing:
             st.success(f"On watchlist — expires {existing['expiry_date']}")
             if st.button("Remove from Watchlist"):
-                _db.remove_from_watchlist(existing["id"])
+                db.remove_from_watchlist(existing["id"])
                 st.rerun()
         else:
             if st.button("Add to Watchlist (30-day monitoring)", type="primary"):
                 eps_date = signal_data.get("eps_change_date", "")
-                if eps_date:
-                    expiry = (datetime.fromisoformat(eps_date) + _timedelta(days=30)).strftime("%Y-%m-%d")
-                else:
-                    expiry = ""
-                entry = {
+                expiry = (
+                    (datetime.fromisoformat(eps_date) + _timedelta(days=30)).strftime("%Y-%m-%d")
+                    if eps_date else ""
+                )
+                db.add_to_watchlist({
                     "ticker": ticker,
                     "signal_type": signal_data.get("signal_type", ""),
                     "eps_change_pct": signal_data.get("eps_change_pct"),
@@ -542,25 +590,12 @@ if signal_data:
                     "ai_analysis": result.get("text", ""),
                     "expiry_date": expiry,
                     "added_date": datetime.now().strftime("%Y-%m-%d"),
-                }
-                _db.add_to_watchlist(entry)
+                })
                 st.success(f"Added {ticker} to watchlist until {expiry}")
                 st.rerun()
-    else:
-        if st.button("Analyze Chart with AI", type="primary"):
-            from core.chart_analyzer import analyze_chart, build_signal_chart
-
-            with st.spinner("Building signal chart and analyzing with Claude..."):
-                try:
-                    signal_fig = build_signal_chart(df, signal_data, earnings)
-                    result = analyze_chart(signal_fig, signal_data)
-                    st.session_state[cache_key] = result
-                    render_analysis(result)
-                    st.rerun()
-                except ValueError as e:
-                    st.error(str(e))
-                except Exception as e:
-                    st.error(f"Analysis failed: {e}")
+else:
+    if st.button("Analyze Chart with AI", type="primary"):
+        run_analysis()
 
 # --- Earnings history table ---
 if earnings:

@@ -164,6 +164,18 @@ class Database:
 
                 CREATE INDEX IF NOT EXISTS idx_trades_status
                     ON trades (status);
+
+                CREATE TABLE IF NOT EXISTS ai_analyses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    analysis_date TEXT NOT NULL,
+                    signal_date TEXT,
+                    text TEXT,
+                    levels_json TEXT,
+                    trend_break_price REAL,
+                    trend_break_condition TEXT,
+                    UNIQUE(ticker)
+                );
             """)
 
     def get_tables(self) -> list[str]:
@@ -464,6 +476,52 @@ class Database:
                 (watchlist_id, level_price),
             ).fetchone()
         return row is not None
+
+    # --- ai_analyses ---
+
+    def save_ai_analysis(self, ticker: str, result: dict, signal_date: str | None = None) -> None:
+        """Persist AI chart analysis for a ticker, overwriting any previous one."""
+        import json as _json
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_analyses
+                    (ticker, analysis_date, signal_date, text, levels_json,
+                     trend_break_price, trend_break_condition)
+                VALUES (?, date('now'), ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    analysis_date        = excluded.analysis_date,
+                    signal_date          = excluded.signal_date,
+                    text                 = excluded.text,
+                    levels_json          = excluded.levels_json,
+                    trend_break_price    = excluded.trend_break_price,
+                    trend_break_condition = excluded.trend_break_condition
+                """,
+                (
+                    ticker,
+                    signal_date,
+                    result.get("text", ""),
+                    _json.dumps(result.get("levels", [])),
+                    result.get("trend_break_price"),
+                    result.get("trend_break_condition", ""),
+                ),
+            )
+
+    def get_ai_analysis(self, ticker: str) -> dict | None:
+        """Return the most recent saved AI analysis for a ticker, or None."""
+        import json as _json
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM ai_analyses WHERE ticker = ?", (ticker,)
+            ).fetchone()
+        if not row:
+            return None
+        r = dict(row)
+        try:
+            r["levels"] = _json.loads(r.get("levels_json") or "[]")
+        except Exception:
+            r["levels"] = []
+        return r
 
     # --- signal_alerts ---
 
