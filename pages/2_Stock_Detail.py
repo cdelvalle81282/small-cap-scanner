@@ -408,7 +408,10 @@ fig.update_layout(
     font=dict(color="white"),
 )
 fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
-fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
+fig.update_xaxes(
+    gridcolor="rgba(255,255,255,0.05)",
+    rangebreaks=[dict(bounds=["sat", "mon"])],  # remove weekend gaps
+)
 
 # --- Overlay AI-identified support/resistance levels if analysis has been run ---
 for key, val in st.session_state.items():

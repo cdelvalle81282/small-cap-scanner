@@ -162,7 +162,10 @@ def build_signal_chart(
         font=dict(color="white"),
     )
     fig.update_yaxes(gridcolor="rgba(255,255,255,0.08)")
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.04)")
+    fig.update_xaxes(
+        gridcolor="rgba(255,255,255,0.04)",
+        rangebreaks=[dict(bounds=["sat", "mon"])],  # remove weekend gaps
+    )
 
     return fig
 
