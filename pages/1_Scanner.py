@@ -40,11 +40,50 @@ SORT_OPTIONS = {
     "EPS Change % (highest)": ("eps_change_pct", True),
 }
 
+
+def parse_optional_float(val: str) -> float | None:
+    val = val.strip()
+    if not val:
+        return None
+    try:
+        return float(val.replace(",", ""))
+    except ValueError:
+        return None
+
+
+def parse_optional_market_cap(val: str) -> float | None:
+    """Parse market cap shorthand: 500M → 500_000_000, 2B → 2_000_000_000."""
+    val = val.strip().upper().replace(",", "")
+    if not val:
+        return None
+    try:
+        if val.endswith("B"):
+            return float(val[:-1]) * 1_000_000_000
+        if val.endswith("M"):
+            return float(val[:-1]) * 1_000_000
+        return float(val)
+    except ValueError:
+        return None
+
+
 # Sidebar controls
 with st.sidebar:
     st.header("Scan Parameters")
-    min_price = st.number_input("Min Price ($)", value=1.0, min_value=0.01, step=0.5)
-    max_price = st.number_input("Max Price ($)", value=50.0, min_value=0.01, step=1.0)
+
+    st.caption("Price Filter (leave blank for no limit)")
+    col_min, col_max = st.columns(2)
+    with col_min:
+        min_price_str = st.text_input("Min $", value="", placeholder="e.g. 1")
+    with col_max:
+        max_price_str = st.text_input("Max $", value="", placeholder="e.g. 50")
+
+    st.caption("Market Cap Filter (leave blank for no limit)")
+    col_mmin, col_mmax = st.columns(2)
+    with col_mmin:
+        min_cap_str = st.text_input("Min Cap", value="", placeholder="e.g. 50M")
+    with col_mmax:
+        max_cap_str = st.text_input("Max Cap", value="", placeholder="e.g. 10B")
+
     ma_pair_label = st.selectbox("MA Crossover", options=list(MA_PAIR_OPTIONS.keys()), index=0)
     eps_threshold = st.slider("Min EPS Change %", min_value=1, max_value=100, value=10)
     trend_window = st.slider("Trend Window (days)", min_value=5, max_value=90, value=30)
@@ -54,11 +93,32 @@ with st.sidebar:
     st.divider()
     run_scan = st.button("Run Scanner", type="primary", use_container_width=True)
 
-if run_scan:
+# Parse optional filters
+min_price = parse_optional_float(min_price_str)
+max_price = parse_optional_float(max_price_str)
+min_cap   = parse_optional_market_cap(min_cap_str)
+max_cap   = parse_optional_market_cap(max_cap_str)
+
+# Validation feedback
+errors = []
+if min_price_str.strip() and min_price is None:
+    errors.append("Min Price is not a valid number.")
+if max_price_str.strip() and max_price is None:
+    errors.append("Max Price is not a valid number.")
+if min_cap_str.strip() and min_cap is None:
+    errors.append("Min Cap is not a valid number (use e.g. 50M or 2B).")
+if max_cap_str.strip() and max_cap is None:
+    errors.append("Max Cap is not a valid number (use e.g. 50M or 2B).")
+for e in errors:
+    st.warning(e)
+
+if run_scan and not errors:
     ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
     config = ScannerConfig(
-        min_price=min_price,
-        max_price=max_price,
+        min_price=min_price if min_price is not None else 0.0,
+        max_price=max_price if max_price is not None else 1_000_000.0,
+        min_market_cap=min_cap if min_cap is not None else 0.0,
+        max_market_cap=max_cap if max_cap is not None else 100_000_000_000_000.0,
         ma_crossover_pairs=[ma_pair],
         eps_change_threshold=float(eps_threshold),
         trend_window_days=trend_window,
