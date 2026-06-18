@@ -32,6 +32,7 @@ MA_PAIR_OPTIONS = {
 
 SORT_OPTIONS = {
     "Cross Date (newest)": ("trend_change_date", True),
+    "Avg Volume (highest)": ("avg_volume", True),
     "Avg $ Volume (highest)": ("avg_dollar_vol", True),
     "Market Cap (highest)": ("market_cap", True),
     "Market Cap (lowest)": ("market_cap", False),
@@ -147,6 +148,7 @@ if run_scan and not errors:
         r["market_cap"] = snap.get("market_cap")
         r["latest_close"] = snap.get("latest_close")
         r["avg_dollar_vol"] = snap.get("avg_dollar_vol")
+        r["avg_volume"] = snap.get("avg_volume")
 
     st.session_state["scan_results"] = raw_results
     st.session_state["scan_sort"] = sort_label
@@ -212,6 +214,7 @@ if results is not None:
                 "Days Between": r.get("days_between", ""),
                 "Price": f"${r['latest_close']:.2f}" if r.get("latest_close") else "N/A",
                 "Mkt Cap": fmt_cap(r.get("market_cap")),
+                "Avg Vol": f"{int(r['avg_volume']):,}" if r.get("avg_volume") else "N/A",
                 "Avg $ Vol": fmt_dvol(r.get("avg_dollar_vol")),
             })
 

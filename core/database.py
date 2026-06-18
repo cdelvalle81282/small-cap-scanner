@@ -297,7 +297,7 @@ class Database:
         return [dict(row) for row in rows]
 
     def get_signal_enrichment(self, tickers: list[str]) -> dict[str, dict]:
-        """Returns {ticker: {market_cap, latest_close, avg_dollar_vol}} for a list of tickers."""
+        """Returns {ticker: {market_cap, latest_close, avg_dollar_vol, avg_volume}} for a list of tickers."""
         if not tickers:
             return {}
         placeholders = ",".join("?" * len(tickers))
@@ -311,7 +311,9 @@ class Database:
                     WHERE ticker IN ({placeholders})
                 ),
                 avg_dvol AS (
-                    SELECT ticker, AVG(close * volume) AS avg_dollar_vol
+                    SELECT ticker,
+                           AVG(close * volume) AS avg_dollar_vol,
+                           AVG(volume) AS avg_volume
                     FROM recent WHERE rn <= 20
                     GROUP BY ticker
                 ),
@@ -319,7 +321,7 @@ class Database:
                     SELECT ticker, close AS latest_close
                     FROM recent WHERE rn = 1
                 )
-                SELECT s.ticker, s.market_cap, l.latest_close, a.avg_dollar_vol
+                SELECT s.ticker, s.market_cap, l.latest_close, a.avg_dollar_vol, a.avg_volume
                 FROM stocks s
                 LEFT JOIN latest l ON l.ticker = s.ticker
                 LEFT JOIN avg_dvol a ON a.ticker = s.ticker
