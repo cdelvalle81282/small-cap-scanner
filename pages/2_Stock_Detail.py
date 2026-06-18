@@ -397,6 +397,10 @@ fig.add_trace(
     col=1,
 )
 
+# Default view: 1 year ending at the last data point (no future space)
+chart_end = df["date"].max().strftime("%Y-%m-%d")
+chart_1y  = (df["date"].max() - pd.DateOffset(years=1)).strftime("%Y-%m-%d")
+
 fig.update_layout(
     height=650,
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
@@ -410,7 +414,29 @@ fig.update_layout(
 fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(
     gridcolor="rgba(255,255,255,0.05)",
-    rangebreaks=[dict(bounds=["sat", "mon"])],  # remove weekend gaps
+    rangebreaks=[dict(bounds=["sat", "mon"])],
+)
+# Range selector on the price panel only; default to 1Y with no future gap
+fig.update_xaxes(
+    range=[chart_1y, chart_end],
+    rangeselector=dict(
+        buttons=[
+            dict(count=3,  label="3M", step="month", stepmode="backward"),
+            dict(count=6,  label="6M", step="month", stepmode="backward"),
+            dict(count=9,  label="9M", step="month", stepmode="backward"),
+            dict(count=1,  label="1Y", step="year",  stepmode="backward"),
+            dict(label="All", step="all"),
+        ],
+        activecolor="#4caf50",
+        bgcolor="#1e1e2e",
+        bordercolor="#555",
+        borderwidth=1,
+        font=dict(color="white", size=11),
+        x=0, y=1.0,
+        xanchor="left",
+        yanchor="bottom",
+    ),
+    row=1, col=1,
 )
 
 # --- Overlay AI-identified support/resistance levels if analysis has been run ---
