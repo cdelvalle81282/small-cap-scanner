@@ -201,6 +201,23 @@ with st.sidebar:
     else:
         reg_window, reg_std = 90, 1.5
 
+# --- Chart range selector ---
+RANGE_OPTIONS = {"3M": 3, "6M": 6, "9M": 9, "1Y": 12, "Max": 60}
+range_key = f"chart_range_{ticker}"
+if range_key not in st.session_state:
+    st.session_state[range_key] = 12  # default 1Y
+
+btn_cols = st.columns(len(RANGE_OPTIONS))
+for i, (label, months) in enumerate(RANGE_OPTIONS.items()):
+    with btn_cols[i]:
+        active = st.session_state[range_key] == months
+        if st.button(label, type="primary" if active else "secondary",
+                     use_container_width=True, key=f"range_{ticker}_{label}"):
+            st.session_state[range_key] = months
+            st.rerun()
+
+selected_months = st.session_state[range_key]
+
 # --- Build chart ---
 fig = make_subplots(
     rows=2,
@@ -411,9 +428,9 @@ fig.add_trace(
     col=1,
 )
 
-# Default view: 1 year ending at the last data point (no future space)
-chart_end = df["date"].max().strftime("%Y-%m-%d")
-chart_1y  = (df["date"].max() - pd.DateOffset(years=1)).strftime("%Y-%m-%d")
+# Set view window based on selected range button
+chart_end  = df["date"].max().strftime("%Y-%m-%d")
+chart_1y   = (df["date"].max() - pd.DateOffset(months=selected_months)).strftime("%Y-%m-%d")
 
 fig.update_layout(
     height=650,
@@ -429,28 +446,7 @@ fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(
     gridcolor="rgba(255,255,255,0.05)",
     rangebreaks=[dict(bounds=["sat", "mon"])],
-)
-# Price panel: default to 1Y, buttons for tighter windows + Max (5yr covers all data)
-fig.update_xaxes(
     range=[chart_1y, chart_end],
-    rangeselector=dict(
-        buttons=[
-            dict(count=3, label="3M", step="month", stepmode="backward"),
-            dict(count=6, label="6M", step="month", stepmode="backward"),
-            dict(count=9, label="9M", step="month", stepmode="backward"),
-            dict(count=1, label="1Y", step="year",  stepmode="backward"),
-            dict(count=5, label="Max", step="year", stepmode="backward"),
-        ],
-        activecolor="#4caf50",
-        bgcolor="#1e1e2e",
-        bordercolor="#555",
-        borderwidth=1,
-        font=dict(color="white", size=11),
-        x=0, y=1.0,
-        xanchor="left",
-        yanchor="bottom",
-    ),
-    row=1, col=1,
 )
 
 # --- Overlay AI-identified support/resistance levels if analysis has been run ---
