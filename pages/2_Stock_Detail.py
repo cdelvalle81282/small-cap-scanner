@@ -214,14 +214,14 @@ fig.add_trace(
     col=1,
 )
 
-# MA overlays
+# MA overlays — solid lines
 if show_ma:
     ma_configs = [
-        (20, "SMA 20", "orange", "dash"),
-        (50, "SMA 50", "green", "dash"),
-        (200, "SMA 200", "red", "dash"),
+        (20,  "SMA 20",  "#ff9800", 1.5),
+        (50,  "SMA 50",  "#4caf50", 1.5),
+        (200, "SMA 200", "#f44336", 2.0),
     ]
-    for period, label, color, dash in ma_configs:
+    for period, label, color, width in ma_configs:
         if len(df) >= period:
             df[f"sma_{period}"] = df["close"].rolling(window=period).mean()
             fig.add_trace(
@@ -229,7 +229,7 @@ if show_ma:
                     x=df["date"],
                     y=df[f"sma_{period}"],
                     name=label,
-                    line=dict(color=color, width=1.5, dash=dash),
+                    line=dict(color=color, width=width),
                     showlegend=True,
                 ),
                 row=1,
@@ -240,7 +240,7 @@ if show_ma:
 if show_trendlines:
     swing_highs, swing_lows = find_swing_points(df, lookback=swing_lookback)
 
-    # Resistance line (swing highs)
+    # Resistance line (swing highs) — solid red
     if len(swing_highs) >= 2:
         result = build_trendline(swing_highs, "high", df)
         if result is not None:
@@ -250,14 +250,14 @@ if show_trendlines:
                     x=dates,
                     y=y_vals,
                     name="Resistance",
-                    line=dict(color="red", width=1.5, dash="dashdot"),
+                    line=dict(color="#ef5350", width=2.0),
                     showlegend=True,
                 ),
                 row=1,
                 col=1,
             )
 
-    # Support line (swing lows)
+    # Support line (swing lows) — solid green
     if len(swing_lows) >= 2:
         result = build_trendline(swing_lows, "low", df)
         if result is not None:
@@ -267,7 +267,7 @@ if show_trendlines:
                     x=dates,
                     y=y_vals,
                     name="Support",
-                    line=dict(color="cyan", width=1.5, dash="dashdot"),
+                    line=dict(color="#26a69a", width=2.0),
                     showlegend=True,
                 ),
                 row=1,
@@ -427,8 +427,8 @@ for key, val in st.session_state.items():
             fig.add_hline(
                 y=price,
                 line_color=color,
-                line_dash="dash",
-                line_width=1.5,
+                line_dash="solid",
+                line_width=2.0,
                 annotation_text=f"  {ltype.title()} ${price:.2f} — {label[:40]}",
                 annotation_position="top left",
                 annotation_font=dict(color=color, size=10),
@@ -440,8 +440,8 @@ for key, val in st.session_state.items():
             fig.add_hline(
                 y=trend_break,
                 line_color="#b388ff",
-                line_dash="dashdot",
-                line_width=2,
+                line_dash="solid",
+                line_width=2.0,
                 annotation_text=f"  Trend Break ${trend_break:.2f}",
                 annotation_position="top left",
                 annotation_font=dict(color="#b388ff", size=10),

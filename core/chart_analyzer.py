@@ -85,18 +85,18 @@ def build_signal_chart(
 
     # MAs
     ma_styles = [
-        ("sma_20", "SMA 20", "orange"),
-        ("sma_50", "SMA 50", "#00e676"),
-        ("sma_200", "SMA 200", "#ef5350"),
+        ("sma_20",  "SMA 20",  "#ff9800", 1.5),
+        ("sma_50",  "SMA 50",  "#4caf50", 1.5),
+        ("sma_200", "SMA 200", "#f44336", 2.0),
     ]
-    for col, label, color in ma_styles:
+    for col, label, color, width in ma_styles:
         if col in subset.columns:
             fig.add_trace(
                 go.Scatter(
                     x=subset["date"],
                     y=subset[col],
                     name=label,
-                    line=dict(color=color, width=1.5, dash="dash"),
+                    line=dict(color=color, width=width),
                 ),
                 row=1, col=1,
             )

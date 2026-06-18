@@ -175,39 +175,82 @@ with tab_watchlist:
         )
     else:
         for entry in entries:
-            arrow = "🟢" if entry["signal_type"] == "bullish" else "🔴"
+            direction = entry["signal_type"]
+            arrow = "🟢" if direction == "bullish" else "🔴"
+            trade_side = "long" if direction == "bullish" else "short"
+
+            try:
+                levels = json.loads(entry["levels_json"])
+            except Exception:
+                levels = []
+
+            # Build the break condition summary for the expander header
+            trend_break_price = entry.get("trend_break_price")
+            break_hint = f" | Break: ${trend_break_price:.2f}" if trend_break_price else ""
+
             with st.expander(
-                f"{arrow} {entry['ticker']} — {entry['signal_type']} | "
-                f"EPS {entry.get('eps_change_pct', 0):+.1f}% | expires {entry['expiry_date']}"
+                f"{arrow} {entry['ticker']} — {direction} {trade_side} | "
+                f"EPS {entry.get('eps_change_pct', 0):+.1f}% | "
+                f"expires {entry['expiry_date']}{break_hint}",
+                expanded=True,
             ):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    try:
-                        levels = json.loads(entry["levels_json"])
-                        if levels:
-                            ldf = pd.DataFrame(levels)[["type", "price", "label"]]
-                            ldf.columns = ["Type", "Price", "Significance"]
-                            ldf["Price"] = ldf["Price"].apply(lambda p: f"${p:.2f}")
-                            st.dataframe(ldf, hide_index=True, use_container_width=True)
-                        else:
-                            st.caption("No AI levels — navigate to Stock Detail and run AI analysis to extract levels.")
-                    except Exception:
-                        pass
+                col_levels, col_meta = st.columns([3, 1])
+
+                with col_levels:
                     if entry.get("trend_break_condition"):
-                        st.info(f"**Trend break:** {entry['trend_break_condition']}")
-                with col2:
-                    st.metric("Signal Date", entry["signal_date"])
-                    st.metric("EPS Date", entry["eps_date"])
+                        st.error(f"**Trend invalidation:** {entry['trend_break_condition']}")
+
+                    if levels:
+                        st.markdown("**Levels monitored daily by `monitor.py`:**")
+                        for lvl in levels:
+                            ltype = lvl.get("type", "")
+                            price = lvl.get("price")
+                            label = lvl.get("label", "")
+                            if not price:
+                                continue
+
+                            if ltype == "resistance":
+                                icon = "🔴"
+                                if direction == "bullish":
+                                    trigger = f"close **above** ${price:.2f} → resistance cleared ✅"
+                                else:
+                                    trigger = f"close **above** ${price:.2f} → bearish thesis invalidated ⚠️"
+                            else:
+                                icon = "🟢"
+                                if direction == "bullish":
+                                    trigger = f"close **below** ${price:.2f} → support broken ⚠️"
+                                else:
+                                    trigger = f"close **below** ${price:.2f} → breakdown confirmed ✅"
+
+                            st.markdown(
+                                f"{icon} **{ltype.title()} ${price:.2f}** — {label}  \n"
+                                f"&nbsp;&nbsp;&nbsp;&nbsp;*Alert fires if: {trigger}*"
+                            )
+                    else:
+                        st.caption(
+                            "No AI levels stored. Navigate to Stock Detail, run AI analysis, "
+                            "then re-add to watchlist to capture levels."
+                        )
+
+                with col_meta:
+                    st.metric("Signal", entry["signal_date"])
+                    st.metric("EPS", entry["eps_date"])
+                    days_left = (
+                        (date.fromisoformat(entry["expiry_date"]) - date.today()).days
+                        if entry.get("expiry_date") else None
+                    )
+                    if days_left is not None:
+                        st.metric("Days left", days_left)
                     if st.button("Enter Trade", key=f"wl_trade_{entry['id']}"):
                         st.session_state["prefill_trade"] = {
                             "ticker": entry["ticker"],
-                            "direction": "long" if entry["signal_type"] == "bullish" else "short",
-                            "signal_type": entry["signal_type"],
+                            "direction": trade_side,
+                            "signal_type": direction,
                             "eps_change_pct": entry.get("eps_change_pct"),
                             "eps_date": entry.get("eps_date", ""),
                             "entry_price": None,
                         }
-                        st.info("Trade pre-filled — click the Trades tab to complete entry.")
+                        st.info("Trade pre-filled — click the Trades tab.")
                     if st.button("Remove", key=f"wl_rm_{entry['id']}"):
                         db.remove_from_watchlist(entry["id"])
                         st.rerun()
