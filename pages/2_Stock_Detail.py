@@ -410,6 +410,45 @@ fig.update_layout(
 fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(gridcolor="rgba(255,255,255,0.05)")
 
+# --- Overlay AI-identified support/resistance levels if analysis has been run ---
+for key, val in st.session_state.items():
+    if key.startswith(f"ai_analysis_{ticker}_") and isinstance(val, dict):
+        levels = val.get("levels", [])
+        trend_break = val.get("trend_break_price")
+        trend_break_prices = {l.get("price") for l in levels}
+
+        for level in levels:
+            price = level.get("price")
+            ltype = level.get("type", "")
+            label = level.get("label", "")
+            if not price:
+                continue
+            color = "#ef5350" if ltype == "resistance" else "#26a69a"
+            fig.add_hline(
+                y=price,
+                line_color=color,
+                line_dash="dash",
+                line_width=1.5,
+                annotation_text=f"  {ltype.title()} ${price:.2f} — {label[:40]}",
+                annotation_position="top left",
+                annotation_font=dict(color=color, size=10),
+                row=1, col=1,
+            )
+
+        # Trend break line in purple if it's a distinct price
+        if trend_break and trend_break not in trend_break_prices:
+            fig.add_hline(
+                y=trend_break,
+                line_color="#b388ff",
+                line_dash="dashdot",
+                line_width=2,
+                annotation_text=f"  Trend Break ${trend_break:.2f}",
+                annotation_position="top left",
+                annotation_font=dict(color="#b388ff", size=10),
+                row=1, col=1,
+            )
+        break
+
 st.plotly_chart(fig, use_container_width=True)
 
 # --- AI Chart Analysis ---
