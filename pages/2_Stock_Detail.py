@@ -429,18 +429,17 @@ fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(
     gridcolor="rgba(255,255,255,0.05)",
     rangebreaks=[dict(bounds=["sat", "mon"])],
-    range=[chart_start.strftime("%Y-%m-%d"), chart_end],  # chart_end is already a string
 )
-# Range selector on the price panel only; default to 1Y with no future gap
+# Price panel: default to 1Y, buttons for tighter windows + Max (5yr covers all data)
 fig.update_xaxes(
     range=[chart_1y, chart_end],
     rangeselector=dict(
         buttons=[
-            dict(count=3,  label="3M", step="month", stepmode="backward"),
-            dict(count=6,  label="6M", step="month", stepmode="backward"),
-            dict(count=9,  label="9M", step="month", stepmode="backward"),
-            dict(count=1,  label="1Y", step="year",  stepmode="backward"),
-            dict(label="All", step="all"),
+            dict(count=3, label="3M", step="month", stepmode="backward"),
+            dict(count=6, label="6M", step="month", stepmode="backward"),
+            dict(count=9, label="9M", step="month", stepmode="backward"),
+            dict(count=1, label="1Y", step="year",  stepmode="backward"),
+            dict(count=5, label="Max", step="year", stepmode="backward"),
         ],
         activecolor="#4caf50",
         bgcolor="#1e1e2e",
