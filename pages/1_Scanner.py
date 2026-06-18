@@ -214,6 +214,10 @@ if results is not None:
         if run_time:
             col3.caption(f"Last scan: {run_time}")
 
+        if not results_sorted:
+            st.info(f"No signals within {max_days_old} days. Widen the 'Max days since crossover' slider or re-run with a broader trend window.")
+            st.stop()
+
         # --- Clickable ticker buttons with date ---
         st.subheader("Tickers")
         n_cols = min(len(results_sorted), 8)
