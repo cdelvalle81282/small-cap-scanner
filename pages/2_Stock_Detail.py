@@ -364,32 +364,33 @@ for earn in earnings:
         col=1,
     )
 
-# Signal highlight
+# Signal highlight — only draw if crossover date is within the chart data range
 if signal_data:
     try:
         trend_date = pd.to_datetime(signal_data.get("trend_change_date"))
-        fast_ma = signal_data.get("fast_ma", "?")
-        slow_ma = signal_data.get("slow_ma", "?")
-        direction = signal_data.get("signal_type", "Cross")
-        fig.add_shape(
-            type="line",
-            x0=trend_date, x1=trend_date, y0=0, y1=1,
-            yref="y domain",
-            line=dict(color="purple", width=2, dash="solid"),
-            row=1,
-            col=1,
-        )
-        fig.add_annotation(
-            x=trend_date,
-            y=1,
-            yref="y domain",
-            text=f"SMA{fast_ma}/{slow_ma} Cross ({direction})",
-            showarrow=False,
-            font=dict(size=11, color="purple"),
-            yanchor="bottom",
-            row=1,
-            col=1,
-        )
+        if chart_start <= trend_date <= chart_end:
+            fast_ma = signal_data.get("fast_ma", "?")
+            slow_ma = signal_data.get("slow_ma", "?")
+            direction = signal_data.get("signal_type", "Cross")
+            fig.add_shape(
+                type="line",
+                x0=trend_date, x1=trend_date, y0=0, y1=1,
+                yref="y domain",
+                line=dict(color="purple", width=2, dash="solid"),
+                row=1,
+                col=1,
+            )
+            fig.add_annotation(
+                x=trend_date,
+                y=1,
+                yref="y domain",
+                text=f"SMA{fast_ma}/{slow_ma} Cross ({direction})",
+                showarrow=False,
+                font=dict(size=11, color="purple"),
+                yanchor="bottom",
+                row=1,
+                col=1,
+            )
     except Exception:
         pass
 
@@ -428,6 +429,7 @@ fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(
     gridcolor="rgba(255,255,255,0.05)",
     rangebreaks=[dict(bounds=["sat", "mon"])],
+    range=[chart_start.strftime("%Y-%m-%d"), chart_end],  # chart_end is already a string
 )
 # Range selector on the price panel only; default to 1Y with no future gap
 fig.update_xaxes(
