@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -53,7 +53,6 @@ def parse_optional_float(val: str) -> float | None:
 
 
 def parse_optional_market_cap(val: str) -> float | None:
-    """Parse market cap shorthand: 500M → 500_000_000, 2B → 2_000_000_000."""
     val = val.strip().upper().replace(",", "")
     if not val:
         return None
@@ -67,6 +66,9 @@ def parse_optional_market_cap(val: str) -> float | None:
         return None
 
 
+# --- Restore params from URL if navigating back ---
+qp = st.query_params
+
 # Sidebar controls
 with st.sidebar:
     st.header("Scan Parameters")
@@ -74,21 +76,35 @@ with st.sidebar:
     st.caption("Price Filter (leave blank for no limit)")
     col_min, col_max = st.columns(2)
     with col_min:
-        min_price_str = st.text_input("Min $", value="", placeholder="e.g. 1")
+        min_price_str = st.text_input("Min $", value=qp.get("min_p", ""), placeholder="e.g. 1")
     with col_max:
-        max_price_str = st.text_input("Max $", value="", placeholder="e.g. 50")
+        max_price_str = st.text_input("Max $", value=qp.get("max_p", ""), placeholder="e.g. 50")
 
     st.caption("Market Cap Filter (leave blank for no limit)")
     col_mmin, col_mmax = st.columns(2)
     with col_mmin:
-        min_cap_str = st.text_input("Min Cap", value="", placeholder="e.g. 50M")
+        min_cap_str = st.text_input("Min Cap", value=qp.get("min_cap", ""), placeholder="e.g. 50M")
     with col_mmax:
-        max_cap_str = st.text_input("Max Cap", value="", placeholder="e.g. 10B")
+        max_cap_str = st.text_input("Max Cap", value=qp.get("max_cap", ""), placeholder="e.g. 10B")
 
-    ma_pair_label = st.selectbox("MA Crossover", options=list(MA_PAIR_OPTIONS.keys()), index=0)
-    eps_threshold = st.slider("Min EPS Change %", min_value=1, max_value=100, value=10)
-    trend_window = st.slider("Trend Window (days)", min_value=5, max_value=90, value=30)
-    direction = st.selectbox("Signal Direction", options=["both", "bullish", "bearish"], index=0)
+    ma_pair_label = st.selectbox(
+        "MA Crossover",
+        options=list(MA_PAIR_OPTIONS.keys()),
+        index=list(MA_PAIR_OPTIONS.keys()).index(qp.get("ma", "20/50")) if qp.get("ma") in MA_PAIR_OPTIONS else 0,
+    )
+    eps_threshold = st.slider("Min EPS Change %", min_value=1, max_value=100, value=int(qp.get("eps", 10)))
+    trend_window = st.slider("Trend Window (days)", min_value=5, max_value=90, value=int(qp.get("window", 30)))
+    direction = st.selectbox(
+        "Signal Direction",
+        options=["both", "bullish", "bearish"],
+        index=["both", "bullish", "bearish"].index(qp.get("dir", "both")) if qp.get("dir") in ["both", "bullish", "bearish"] else 0,
+    )
+    max_days_old = st.slider(
+        "Max days since crossover",
+        min_value=1, max_value=365,
+        value=int(qp.get("recency", 30)),
+        help="Only show signals where the MA crossover happened within this many days",
+    )
     st.divider()
     sort_label = st.selectbox("Sort By", options=list(SORT_OPTIONS.keys()), index=0)
     st.divider()
@@ -100,7 +116,7 @@ max_price = parse_optional_float(max_price_str)
 min_cap   = parse_optional_market_cap(min_cap_str)
 max_cap   = parse_optional_market_cap(max_cap_str)
 
-# Validation feedback
+# Validation
 errors = []
 if min_price_str.strip() and min_price is None:
     errors.append("Min Price is not a valid number.")
@@ -113,7 +129,10 @@ if max_cap_str.strip() and max_cap is None:
 for e in errors:
     st.warning(e)
 
-if run_scan and not errors:
+# Auto-run if URL params present and no cached results yet
+auto_run = bool(qp.get("ma")) and "scan_results" not in st.session_state
+
+if (run_scan or auto_run) and not errors:
     ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
     config = ScannerConfig(
         min_price=min_price if min_price is not None else 0.0,
@@ -151,33 +170,66 @@ if run_scan and not errors:
         r["avg_volume"] = snap.get("avg_volume")
 
     st.session_state["scan_results"] = raw_results
-    st.session_state["scan_sort"] = sort_label
+    st.session_state["scan_run_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-# Display results (persisted across page navigations)
+    # Persist scan config in URL so navigating back auto-restores the scan
+    st.query_params.update({
+        "min_p": min_price_str,
+        "max_p": max_price_str,
+        "min_cap": min_cap_str,
+        "max_cap": max_cap_str,
+        "ma": ma_pair_label,
+        "eps": str(eps_threshold),
+        "window": str(trend_window),
+        "dir": direction,
+        "recency": str(max_days_old),
+    })
+
+# Display results
 results = st.session_state.get("scan_results")
+run_time = st.session_state.get("scan_run_time", "")
 
 if results is not None:
     if results:
+        today = date.today()
+
+        # Apply recency filter
+        results_recent = [
+            r for r in results
+            if (today - date.fromisoformat(r["trend_change_date"])).days <= max_days_old
+        ]
+        filtered_out = len(results) - len(results_recent)
+
         # Apply sort
         sort_key, sort_desc = SORT_OPTIONS[sort_label]
         results_sorted = sorted(
-            results,
+            results_recent,
             key=lambda r: (r.get(sort_key) is None, r.get(sort_key) or 0),
             reverse=sort_desc,
         )
 
-        st.metric("Total Signals", len(results_sorted))
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Signals", len(results_sorted))
+        col2.metric("Filtered (too old)", filtered_out)
+        if run_time:
+            col3.caption(f"Last scan: {run_time}")
 
-        # --- Clickable ticker buttons ---
+        # --- Clickable ticker buttons with date ---
         st.subheader("Tickers")
-        n_cols = min(len(results_sorted), 10)
+        n_cols = min(len(results_sorted), 8)
         rows_chunked = [results_sorted[i : i + n_cols] for i in range(0, len(results_sorted), n_cols)]
         for row_chunk in rows_chunked:
             btn_cols = st.columns(n_cols)
             for i, result in enumerate(row_chunk):
                 ticker = result["ticker"]
                 signal = result.get("signal_type", "")
-                label = f"{'🟢' if signal == 'bullish' else '🔴'} {ticker}"
+                arrow = "🟢" if signal == "bullish" else "🔴"
+                try:
+                    cross_dt = datetime.fromisoformat(result["trend_change_date"])
+                    date_str = cross_dt.strftime("%b %d")
+                except Exception:
+                    date_str = ""
+                label = f"{arrow} {ticker}\n{date_str}"
                 with btn_cols[i]:
                     if st.button(label, key=f"ticker_{ticker}_{result['trend_change_date']}"):
                         st.session_state["selected_ticker"] = ticker
@@ -204,6 +256,10 @@ if results is not None:
         table_rows = []
         for r in results_sorted:
             eps_chg = r.get("eps_change_pct")
+            try:
+                days_ago = (today - date.fromisoformat(r["trend_change_date"])).days
+            except Exception:
+                days_ago = None
             table_rows.append({
                 "Ticker": r["ticker"],
                 "Signal": r.get("signal_type", ""),
@@ -211,7 +267,7 @@ if results is not None:
                 "EPS Chg %": f"{eps_chg:+.1f}%" if eps_chg is not None else "N/A",
                 "EPS Date": r.get("eps_change_date", ""),
                 "Cross Date": r.get("trend_change_date", ""),
-                "Days Between": r.get("days_between", ""),
+                "Days Ago": days_ago,
                 "Price": f"${r['latest_close']:.2f}" if r.get("latest_close") else "N/A",
                 "Mkt Cap": fmt_cap(r.get("market_cap")),
                 "Avg Vol": f"{int(r['avg_volume']):,}" if r.get("avg_volume") else "N/A",
