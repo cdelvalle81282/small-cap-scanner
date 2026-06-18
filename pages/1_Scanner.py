@@ -129,10 +129,60 @@ if max_cap_str.strip() and max_cap is None:
 for e in errors:
     st.warning(e)
 
-# Auto-run if URL params present and no cached results yet
-auto_run = bool(qp.get("ma")) and "scan_results" not in st.session_state
+def _db_alert_to_signal(a: dict) -> dict:
+    """Convert a signal_alerts DB row back to scanner signal format."""
+    return {
+        "ticker": a["ticker"],
+        "scan_date": a.get("alert_date", ""),
+        "signal_type": a["signal_type"],
+        "fast_ma": a.get("fast_ma", 20),
+        "slow_ma": a.get("slow_ma", 50),
+        "eps_change_pct": a.get("eps_change_pct"),
+        "trend_change_date": a.get("cross_date", ""),
+        "eps_change_date": a.get("eps_date", ""),
+        "days_between": a.get("days_between"),
+    }
 
-if (run_scan or auto_run) and not errors:
+
+def _enrich(signals: list[dict]) -> list[dict]:
+    tickers = [r["ticker"] for r in signals]
+    enrichment = db.get_signal_enrichment(tickers)
+    for r in signals:
+        snap = enrichment.get(r["ticker"], {})
+        r["market_cap"] = snap.get("market_cap")
+        r["latest_close"] = snap.get("latest_close")
+        r["avg_dollar_vol"] = snap.get("avg_dollar_vol")
+        r["avg_volume"] = snap.get("avg_volume")
+    return signals
+
+
+def _merge_into(base: dict[str, dict], incoming: list[dict]) -> dict[str, dict]:
+    """Merge incoming signals into base dict keyed by ticker, keeping most recent crossover."""
+    for sig in incoming:
+        t = sig["ticker"]
+        if not sig.get("trend_change_date"):
+            continue
+        if t not in base or sig["trend_change_date"] > base[t]["trend_change_date"]:
+            base[t] = sig
+    return base
+
+
+# ── Load persisted signals from DB on every page open ────────────────────────
+today = date.today()
+cutoff = (today - timedelta(days=max_days_old)).isoformat()
+db_alerts = db.get_signal_alerts(cutoff, today.isoformat())
+db_signals: dict[str, dict] = {}
+if db_alerts:
+    for a in db_alerts:
+        sig = _db_alert_to_signal(a)
+        t = sig["ticker"]
+        if not sig["trend_change_date"]:
+            continue
+        if t not in db_signals or sig["trend_change_date"] > db_signals[t]["trend_change_date"]:
+            db_signals[t] = sig
+
+# ── Manual scan ───────────────────────────────────────────────────────────────
+if run_scan and not errors:
     ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
     config = ScannerConfig(
         min_price=min_price if min_price is not None else 0.0,
@@ -150,44 +200,45 @@ if (run_scan or auto_run) and not errors:
     with st.spinner("Scanning..."):
         all_signals = scanner.scan(as_of_date)
 
-    # Keep only the most recent signal per ticker
-    latest_by_ticker: dict[str, dict] = {}
+    # Keep most recent per ticker from this scan
+    scan_latest: dict[str, dict] = {}
     for sig in all_signals:
         t = sig["ticker"]
-        if t not in latest_by_ticker or sig["trend_change_date"] > latest_by_ticker[t]["trend_change_date"]:
-            latest_by_ticker[t] = sig
+        if t not in scan_latest or sig["trend_change_date"] > scan_latest[t]["trend_change_date"]:
+            scan_latest[t] = sig
 
-    raw_results = list(latest_by_ticker.values())
+    # Save new signals to DB so they persist across sessions
+    for sig in scan_latest.values():
+        db.save_signal_alert({
+            "ticker": sig["ticker"],
+            "alert_date": as_of_date,
+            "signal_type": sig["signal_type"],
+            "fast_ma": sig.get("fast_ma"),
+            "slow_ma": sig.get("slow_ma"),
+            "eps_change_pct": sig.get("eps_change_pct"),
+            "eps_date": sig.get("eps_change_date", ""),
+            "cross_date": sig.get("trend_change_date", ""),
+            "days_between": sig.get("days_between"),
+            "close_price": None,
+        })
 
-    # Enrich with market cap, price, volume
-    tickers = [r["ticker"] for r in raw_results]
-    enrichment = db.get_signal_enrichment(tickers)
-    for r in raw_results:
-        snap = enrichment.get(r["ticker"], {})
-        r["market_cap"] = snap.get("market_cap")
-        r["latest_close"] = snap.get("latest_close")
-        r["avg_dollar_vol"] = snap.get("avg_dollar_vol")
-        r["avg_volume"] = snap.get("avg_volume")
-
-    st.session_state["scan_results"] = raw_results
+    # Merge scan results into the DB-loaded set
+    db_signals = _merge_into(db_signals, list(scan_latest.values()))
     st.session_state["scan_run_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # Persist scan config in URL so navigating back auto-restores the scan
     st.query_params.update({
-        "min_p": min_price_str,
-        "max_p": max_price_str,
-        "min_cap": min_cap_str,
-        "max_cap": max_cap_str,
-        "ma": ma_pair_label,
-        "eps": str(eps_threshold),
-        "window": str(trend_window),
-        "dir": direction,
+        "min_p": min_price_str, "max_p": max_price_str,
+        "min_cap": min_cap_str, "max_cap": max_cap_str,
+        "ma": ma_pair_label, "eps": str(eps_threshold),
+        "window": str(trend_window), "dir": direction,
         "recency": str(max_days_old),
     })
 
-# Display results
-results = st.session_state.get("scan_results")
+# ── Build final result set ────────────────────────────────────────────────────
 run_time = st.session_state.get("scan_run_time", "")
+results: list[dict] | None = None
+if db_signals:
+    results = _enrich(list(db_signals.values()))
 
 if results is not None:
     if results:
@@ -211,8 +262,8 @@ if results is not None:
         col1, col2, col3 = st.columns(3)
         col1.metric("Signals", len(results_sorted))
         col2.metric("Filtered (too old)", filtered_out)
-        if run_time:
-            col3.caption(f"Last scan: {run_time}")
+        source = f"Last manual scan: {run_time}" if run_time else f"Loaded from saved alerts (last {max_days_old} days)"
+        col3.caption(source)
 
         if not results_sorted:
             st.info(f"No signals within {max_days_old} days. Widen the 'Max days since crossover' slider or re-run with a broader trend window.")
@@ -282,6 +333,6 @@ if results is not None:
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info(
-            "No signals found for the selected parameters. "
-            "Try lowering the EPS threshold, widening the trend window, or running the pipeline to load more data."
+            f"No saved signals in the last {max_days_old} days. "
+            "Run the scanner to search for new signals, or widen the 'Max days since crossover' slider."
         )
