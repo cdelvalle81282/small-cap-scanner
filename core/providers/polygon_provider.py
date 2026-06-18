@@ -154,37 +154,71 @@ class PolygonProvider(DataProvider):
             return empty
 
     def get_small_cap_universe(self, min_price: float, max_price: float) -> list[str]:
-        """Filter the hardcoded universe to tickers currently within the price range."""
-        candidates = list(SMALL_CAP_UNIVERSE)
+        """Dynamically discover all active NYSE/NASDAQ/AMEX common stocks in the price range.
+
+        Falls back to the hardcoded SMALL_CAP_UNIVERSE if the Polygon API fails.
+        """
         try:
-            valid = []
-            for i in range(0, len(candidates), _SNAPSHOT_BATCH):
-                batch = candidates[i : i + _SNAPSHOT_BATCH]
+            return self._dynamic_universe(min_price, max_price)
+        except Exception:
+            logger.exception("Dynamic universe discovery failed, falling back to hardcoded list")
+            return list(SMALL_CAP_UNIVERSE)
+
+    def _dynamic_universe(self, min_price: float, max_price: float) -> list[str]:
+        """Page through Polygon reference tickers and price-filter via snapshot."""
+        _TARGET_EXCHANGES = {"XNAS", "XNYS", "XASE"}  # NASDAQ, NYSE, NYSE American
+
+        # Step 1: collect all active common stock tickers on target exchanges
+        all_tickers: list[str] = []
+        url = f"{_BASE}/v3/reference/tickers"
+        params: dict = {
+            "market": "stocks",
+            "type": "CS",
+            "active": "true",
+            "limit": 1000,
+            "apiKey": self.api_key,
+        }
+        page = 0
+        while url:
+            resp = self._session.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            for t in data.get("results") or []:
+                if t.get("primary_exchange") in _TARGET_EXCHANGES:
+                    all_tickers.append(t["ticker"])
+            next_url = data.get("next_url")
+            url = next_url or None
+            params = {"apiKey": self.api_key}
+            page += 1
+            time.sleep(0.12)
+
+        logger.info("Reference API returned %d NYSE/NASDAQ/AMEX CS tickers", len(all_tickers))
+
+        # Step 2: price-filter via snapshot in batches
+        valid: list[str] = []
+        for i in range(0, len(all_tickers), _SNAPSHOT_BATCH):
+            batch = all_tickers[i : i + _SNAPSHOT_BATCH]
+            try:
                 data = self._get(
                     "/v2/snapshot/locale/us/markets/stocks/tickers",
                     {"tickers": ",".join(batch)},
                 )
                 for snap in data.get("tickers") or []:
                     ticker = snap.get("ticker")
-                    # Prefer today's close; fall back to previous close
-                    day = snap.get("day") or {}
+                    day  = snap.get("day") or {}
                     prev = snap.get("prevDay") or {}
                     price = day.get("c") or prev.get("c")
                     if price and min_price <= price <= max_price:
                         valid.append(ticker)
-                time.sleep(0.1)  # be polite between batches
+            except Exception:
+                logger.warning("Snapshot batch %d failed, skipping", i // _SNAPSHOT_BATCH)
+            time.sleep(0.1)
 
-            if valid:
-                logger.info(
-                    "Price-filtered universe: %d/%d tickers in $%.0f-$%.0f range",
-                    len(valid), len(candidates), min_price, max_price,
-                )
-                return valid
-
-        except Exception:
-            logger.exception("Snapshot price filter failed, returning full universe")
-
-        return candidates
+        logger.info(
+            "Price-filtered universe: %d/%d tickers in $%.0f–$%.0f range",
+            len(valid), len(all_tickers), min_price, max_price,
+        )
+        return valid
 
     def get_fundamentals(self, ticker: str) -> pd.DataFrame:
         empty = pd.DataFrame(columns=["period", "revenue", "gross_margin", "operating_margin"])
