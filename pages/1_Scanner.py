@@ -12,6 +12,8 @@ from core.database import Database
 from core.scanner import Scanner
 
 st.set_page_config(page_title="Scanner", page_icon="🔍", layout="wide")
+from core.styles import inject_styles
+inject_styles()
 
 
 @st.cache_resource

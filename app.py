@@ -17,6 +17,8 @@ from config import DB_PATH
 from core.database import Database
 
 st.set_page_config(page_title="Small Cap Scanner", page_icon="📊", layout="wide")
+from core.styles import inject_styles
+inject_styles()
 st.title("Small Cap EPS + Trend Scanner")
 st.markdown(
     "Identifies small cap stocks ($1-$50) where a moving average trend change occurs "

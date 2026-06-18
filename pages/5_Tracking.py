@@ -13,6 +13,8 @@ from config import DB_PATH
 from core.database import Database
 
 st.set_page_config(page_title="Tracking", page_icon="📋", layout="wide")
+from core.styles import inject_styles
+inject_styles()
 
 
 @st.cache_resource
