@@ -442,12 +442,31 @@ fig.update_layout(
     paper_bgcolor="rgba(0,0,0,0)",
     font=dict(color="white"),
 )
-fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 fig.update_xaxes(
     gridcolor="rgba(255,255,255,0.05)",
     rangebreaks=[dict(bounds=["sat", "mon"])],
     range=[chart_1y, chart_end],
 )
+
+# Y-axis: scale to only the data visible in the current time window
+visible = df[(df["date"] >= pd.to_datetime(chart_1y)) & (df["date"] <= pd.to_datetime(chart_end))]
+if not visible.empty:
+    y_lo = visible["low"].min()
+    y_hi = visible["high"].max()
+    # Also include any AI levels so they stay visible
+    ai_val = st.session_state.get(f"ai_analysis_{ticker}", {})
+    for lvl in ai_val.get("levels", []):
+        p = lvl.get("price")
+        if p:
+            y_lo = min(y_lo, p)
+            y_hi = max(y_hi, p)
+    pad = (y_hi - y_lo) * 0.05
+    fig.update_yaxes(
+        range=[y_lo - pad, y_hi + pad],
+        gridcolor="rgba(255,255,255,0.1)",
+        row=1, col=1,
+    )
+fig.update_yaxes(gridcolor="rgba(255,255,255,0.1)")
 
 # --- Overlay AI-identified support/resistance levels if analysis has been run ---
 _ai_val = st.session_state.get(f"ai_analysis_{ticker}")
