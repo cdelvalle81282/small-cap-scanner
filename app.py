@@ -7,6 +7,12 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 from config import DB_PATH
 from core.database import Database
 
