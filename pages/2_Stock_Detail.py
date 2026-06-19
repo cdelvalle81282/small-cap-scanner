@@ -594,7 +594,7 @@ if cache_key in st.session_state:
                 eps_date = signal_data.get("eps_change_date", "")
                 expiry = (
                     (datetime.fromisoformat(eps_date) + _timedelta(days=30)).strftime("%Y-%m-%d")
-                    if eps_date else ""
+                    if eps_date else (datetime.now() + _timedelta(days=30)).strftime("%Y-%m-%d")
                 )
                 db.add_to_watchlist({
                     "ticker": ticker,
