@@ -18,9 +18,9 @@ YFinance/Polygon → pipeline.py → SQLite (data/scanner.db) → core/ (Scanner
 - `core/database.py` — single Database class, all tables in one SQLite file
 - `core/providers/` — DataProvider ABC, YFinanceProvider, PolygonProvider
 - `core/scoring.py` — signal quality score (0-100 + factor breakdown)
-- `core/performance.py` — follow-through: forward returns at 15/30/60/90d
-- `core/chart_analyzer.py` — Claude vision AI analysis via kaleido PNG export (model: claude-sonnet-5)
-- `api/main.py` — FastAPI JSON API (meta, signals, performance, ticker, watchlist, trades, analyze); also serves `web/`
+- `core/performance.py` — follow-through: current (mark-to-market) + forward returns at 15/30/60/90d per trigger, direction-aware, no stop
+- `core/chart_analyzer.py` — Claude vision AI analysis via kaleido PNG export (model: claude-sonnet-5). Saved analyses auto-expire after 7 days (`get_ai_analysis` TTL)
+- `api/main.py` — FastAPI JSON API (meta, signals, performance, ticker, watchlist, trades, analyze); also serves `web/`. **Both `/api/signals` and `/api/performance` are cached** (keyed on config + latest price date) and prewarmed on startup — `/api/performance` is the heaviest call, keep it cached + universe-constrained or the 502 returns (see memory `perf-endpoint-cost`)
 - `core/notifier.py` — alert dispatch stubs (email/Slack not yet wired)
 - `monitor.py` — daily watchlist price level checker
 - `scan_and_notify.py` — daily new signal scanner, writes to signal_alerts table
@@ -28,10 +28,12 @@ YFinance/Polygon → pipeline.py → SQLite (data/scanner.db) → core/ (Scanner
 ## Frontend (web/ SPA — current)
 Vanilla HTML/CSS/JS single-page app served by FastAPI, hash-routed (`web/js/views/`):
 - **Overview** — KPI tiles, freshness, top signals by quality
-- **Scanner** — filter rail, signal table (sparklines · RVOL · quality score), linked focus panel
-- **Follow-Through** — realized returns at 15/30/60/90d per trigger + aggregates
-- **Detail** — lightweight-charts candles + SMA, forward returns, AI analysis
+- **Scanner** — filter rail, signal table (sparklines · RVOL · quality score), linked focus panel. Clicking a ticker cell opens Detail
+- **Triggered** (route `performance`, nav label "Triggered") — track record of every trigger: current + 15/30/60/90d returns, aggregate cards, sortable columns, table capped to top 300 sorted rows
+- **Detail** — lightweight-charts candles + SMA 20/50/200, diagonal swing-pivot trendlines, AI support/resistance + trend-break levels, EPS/cross markers, forward returns, AI analysis
 - **Tracking** — Alerts | Watchlist | Trades
+
+Chart gotcha: `createPriceLine` does NOT render in the standalone lightweight-charts build — draw horizontal levels and trendlines as `addLineSeries` instead (trendlines use `autoscaleInfoProvider: () => null` so they don't distort the candle scale). See memory `lightweight-charts-lines`.
 
 Legacy Streamlit (`app.py`, `pages/1_Scanner.py` … `pages/5_Tracking.py`) is retired but kept in-repo for reference.
 
