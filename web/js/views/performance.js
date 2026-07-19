@@ -117,7 +117,7 @@ function paint(root, ctx) {
   $("#body", root).innerHTML = `
     <div class="ft-cards" style="grid-template-columns:repeat(5,1fr)">${cards}</div>
     <div class="panel"><div class="phead"><h3>${d.summary.total_signals} triggers · sortable track record</h3>
-      <span class="lbl">click a column to sort · · = not enough forward data yet</span></div>
+      <span class="lbl" id="ft-count"></span></div>
       <div style="overflow-x:auto;max-height:60vh"><table class="ft-tbl">
         <thead><tr>
           ${th("ticker", "Ticker", false)}${th("dir", "Dir", false)}${th("eps", "EPS Δ")}
@@ -135,8 +135,15 @@ function paint(root, ctx) {
   paintRows(root, ctx);
 }
 
+const ROW_CAP = 300;  // sort runs over all triggers; only the top slice is rendered (DOM perf)
+
 function paintRows(root, ctx) {
-  const rows = sortedRows();
+  const all = sortedRows();
+  const rows = all.slice(0, ROW_CAP);
+  const note = $("#ft-count", root);
+  if (note) note.innerHTML = all.length > ROW_CAP
+    ? `showing top <b>${ROW_CAP}</b> of ${all.length}, sorted — narrow the filters to see more · click a column to sort`
+    : `click a column to sort · · = not enough forward data yet`;
   const cell = (v) => v == null ? `<td class="pending">·</td>` : `<td class="${cls(v)}">${pct(v, 1)}</td>`;
   $("#ft-body", root).innerHTML = rows.map((s, i) => {
     const bull = s.signal_type === "bullish";
