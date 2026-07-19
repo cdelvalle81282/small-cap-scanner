@@ -229,3 +229,19 @@ nav a{font-size:15px}
 .legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-left:8px}
 #levels-note{padding:8px 15px;font-family:var(--mono);font-size:12.5px;color:var(--t3);border-top:1px solid var(--border)}
 #levels-note:empty{display:none;padding:0;border:none}
+
+/* larger top-right clock + bottom-left freshness readout */
+.clock{font-size:16px}
+.clock b{font-size:15px}
+.fresh .meta .l{font-size:14px}
+.fresh .meta .s{font-size:11px}
+
+/* scanner: ticker cell opens the detail view on click */
+.trow .tk{cursor:pointer}
+.trow .tk b{transition:color .12s}
+.trow .tk:hover b{color:var(--cyan);text-decoration:underline}
+
+/* triggered track record: sortable headers */
+.ft-tbl th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+.ft-tbl th.sortable:hover{color:var(--cyan)}
+.ft-tbl th .arrow{color:var(--cyan);font-size:11px;margin-left:2px}

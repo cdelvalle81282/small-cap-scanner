@@ -575,12 +575,19 @@ class Database:
                 ),
             )
 
-    def get_ai_analysis(self, ticker: str) -> dict | None:
-        """Return the most recent saved AI analysis for a ticker, or None."""
+    def get_ai_analysis(self, ticker: str, max_age_days: int = 7) -> dict | None:
+        """Return the saved AI analysis for a ticker if it's still fresh, else None.
+
+        Analyses auto-expire after `max_age_days` (default 7) so stale reads of a
+        chart the price action has moved past don't linger. The row is left in
+        place — a re-run overwrites it — but is hidden from the UI once expired.
+        """
         import json as _json
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM ai_analyses WHERE ticker = ?", (ticker,)
+                "SELECT * FROM ai_analyses "
+                "WHERE ticker = ? AND analysis_date >= date('now', ?)",
+                (ticker, f"-{int(max_age_days)} days"),
             ).fetchone()
         if not row:
             return None

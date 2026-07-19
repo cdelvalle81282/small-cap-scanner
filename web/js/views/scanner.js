@@ -107,7 +107,12 @@ function paint(root, ctx) {
     <span class="neg">${d.bearish} bear</span>`;
   $("#rows", root).innerHTML = rows.length ? rows.map((r, i) => rowHTML(r, i)).join("") : `<div class="loading">No signals match — widen the filters.</div>`;
   const rc = $("#rows", root);
-  rc.onclick = e => { const t = e.target.closest(".trow"); if (t) select(root, ctx, +t.dataset.i); };
+  rc.onclick = e => {
+    const t = e.target.closest(".trow"); if (!t) return;
+    const i = +t.dataset.i;
+    if (e.target.closest(".tk")) { openDetail(ctx, st.rows[i]); return; }
+    select(root, ctx, i);
+  };
   rc.onmouseover = e => { const t = e.target.closest(".trow"); if (t) select(root, ctx, +t.dataset.i); };
   if (rows.length) select(root, ctx, Math.min(st.sel, rows.length - 1));
   else $("#focus", root).innerHTML = `<div class="loading">No selection</div>`;
@@ -127,6 +132,12 @@ function rowHTML(r, i) {
   </div>`;
 }
 
+function openDetail(ctx, r) {
+  if (!r) return;
+  state.signal = r;
+  ctx.navigate("ticker", { sym: r.ticker, cross: r.trend_change_date, dir: r.signal_type });
+}
+
 const FLAB = { eps: "EPS surprise", rvol: "Relative volume", trend: "Trend alignment", timing: "Cross timing" };
 function select(root, ctx, i) {
   st.sel = i;
@@ -142,7 +153,7 @@ function select(root, ctx, i) {
       ${Object.entries(FLAB).map(([k, lab]) => `<div class="factor"><div class="fr"><span>${lab}</span><b>${fval[k]}</b></div>
         <div class="fbar"><i style="width:${r.factors[k]}%"></i></div></div>`).join("")}</div>
     <div class="fx-actions"><button class="btn" id="watch">☆ Watch 30d</button><button class="btn solid" id="open">Open detail →</button></div>`;
-  $("#open", root).onclick = () => { state.signal = r; ctx.navigate("ticker", { sym: r.ticker, cross: r.trend_change_date, dir: r.signal_type }); };
+  $("#open", root).onclick = () => openDetail(ctx, r);
   $("#watch", root).onclick = async e => {
     const b = e.target; b.disabled = true; b.textContent = "…";
     try {

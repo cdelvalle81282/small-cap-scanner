@@ -50,7 +50,7 @@ export async function render(root, ctx, params) {
 
     <div class="panel" style="margin-bottom:14px">
       <div class="phead"><h3>Price &amp; annotations</h3>
-        <span class="legend"><i style="background:#f59e0b"></i>SMA20 <i style="background:#22d3ee"></i>SMA50 <i style="background:#ef4444"></i>SMA200 <i style="background:#a78bfa"></i>EPS <i style="background:#c084fc"></i>cross</span></div>
+        <span class="legend"><i style="background:#f59e0b"></i>SMA20 <i style="background:#22d3ee"></i>SMA50 <i style="background:#ef4444"></i>SMA200 <i style="background:#a78bfa"></i>EPS <i style="background:#c084fc"></i>cross <i style="background:#fb7185"></i>trend↓ <i style="background:#34d399"></i>trend↑</span></div>
       <div id="chart"></div>
       <div id="levels-note"></div>
     </div>
@@ -106,6 +106,36 @@ function sma(prices, period) {
   return out;
 }
 
+// Swing pivots within a window: bar i is a pivot high if its high is the local
+// max across ±k bars (pivot low: local min of lows). k=3 filters minor noise.
+function pivots(win, k = 3) {
+  const hi = [], lo = [];
+  for (let i = k; i < win.length - k; i++) {
+    let ph = true, pl = true;
+    for (let j = i - k; j <= i + k; j++) {
+      if (win[j].h > win[i].h) ph = false;
+      if (win[j].l < win[i].l) pl = false;
+    }
+    if (ph) hi.push(i);
+    if (pl) lo.push(i);
+  }
+  return { hi, lo };
+}
+
+// A diagonal trendline through the two most recent swing pivots, extended to the
+// last bar. Returns the two endpoints as line-series data (or null if <2 pivots).
+function trendline(win, idxs, key) {
+  if (idxs.length < 2) return null;
+  const a = idxs[idxs.length - 2], b = idxs[idxs.length - 1];
+  const va = win[a][key], vb = win[b][key];
+  const slope = (vb - va) / (b - a);
+  const last = win.length - 1;
+  return [
+    { time: win[a].date, value: +va.toFixed(4) },
+    { time: win[last].date, value: +(va + slope * (last - a)).toFixed(4) },
+  ];
+}
+
 // nearest trading-day bar on or before a target date (EPS often lands off-session)
 function snapToBar(dates, target) {
   if (!dates.length) return target;
@@ -135,6 +165,23 @@ function drawChart(container, prices, cross, earnings) {
   chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(sma(prices, 20));
   chart.addLineSeries({ color: "#22d3ee", lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(sma(prices, 50));
   chart.addLineSeries({ color: "#ef4444", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(sma(prices, 200));
+
+  // Diagonal trendlines through recent swing pivots (last ~90 bars). Excluded
+  // from autoscale so an extended line never compresses the candles.
+  const win = prices.slice(-Math.min(prices.length, 90));
+  if (win.length >= 15) {
+    const pv = pivots(win, 3);
+    const drawTrend = (data, color) => {
+      if (!data) return;
+      chart.addLineSeries({
+        color, lineWidth: 2, lineStyle: 2, priceLineVisible: false,
+        lastValueVisible: false, crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => null,
+      }).setData(data);
+    };
+    drawTrend(trendline(win, pv.hi, "h"), "#fb7185");  // resistance / downtrend
+    drawTrend(trendline(win, pv.lo, "l"), "#34d399");  // support / uptrend
+  }
 
   // markers: every earnings report (▲ beat / ▼ miss) + the MA crossover
   const dates = prices.map(p => p.date);

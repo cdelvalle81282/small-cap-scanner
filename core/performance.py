@@ -29,16 +29,28 @@ def _forward_returns(rows: list[dict], cross_date: str, direction: str,
     entry = rows[idx].get("close")
     if not entry or entry <= 0:
         return None
+
+    def _ret(exit_close):
+        if not exit_close:
+            return None
+        raw = (exit_close - entry) / entry * 100
+        return round(raw if direction == "bullish" else -raw, 2)
+
     out: dict[int, float | None] = {}
     for h in horizons:
         j = idx + h
-        exit_close = rows[j].get("close") if j < len(rows) else None
-        if exit_close:
-            raw = (exit_close - entry) / entry * 100
-            out[h] = round(raw if direction == "bullish" else -raw, 2)
-        else:
-            out[h] = None
-    return {"entry_date": cross_date, "entry_price": round(entry, 4), "forward_returns": out}
+        out[h] = _ret(rows[j].get("close") if j < len(rows) else None)
+
+    # mark-to-market: return from the trigger close to the most recent close
+    last_close = rows[-1].get("close") if rows else None
+    return {
+        "entry_date": cross_date,
+        "entry_price": round(entry, 4),
+        "forward_returns": out,
+        "current_return": _ret(last_close),
+        "days_held": len(rows) - 1 - idx,
+        "last_close": round(last_close, 4) if last_close else None,
+    }
 
 
 def follow_through(
@@ -65,11 +77,13 @@ def follow_through(
             if fr is None:
                 continue
             signals.append({**sig, **fr})
+    cur = _aggregate([s.get("current_return") for s in signals])
     return {
         "signals": signals,
         "summary": {
             "total_signals": len(signals),
             "by_horizon": summarize_horizons(signals, horizons),
+            "current": cur,
         },
     }
 
@@ -104,28 +118,32 @@ def relative_volume(db: Database, ticker: str, as_of: str | None = None) -> floa
     return round(vols[-1] / avg20, 2)
 
 
+def _aggregate(returns: list) -> dict:
+    """Win-rate / avg / median over a list of returns (Nones dropped)."""
+    rets = [r for r in returns if r is not None]
+    if not rets:
+        return {"win_rate": None, "avg_return": None, "median_return": None, "sample": 0}
+    wins = sum(1 for r in rets if r > 0)
+    s = sorted(rets)
+    mid = len(s) // 2
+    med = s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
+    return {
+        "win_rate": round(wins / len(rets) * 100, 1),
+        "avg_return": round(mean(rets), 2),
+        "median_return": round(med, 2),
+        "sample": len(rets),
+    }
+
+
 def summarize_horizons(
     signals: list[dict], horizons: tuple[int, ...] = DEFAULT_HORIZONS
 ) -> dict[int, dict]:
     """Aggregate win-rate / avg / median realized return per horizon across signals."""
-    out: dict[int, dict] = {}
-    for h in horizons:
-        rets = [
-            s["forward_returns"][h]
+    return {
+        h: _aggregate([
+            s["forward_returns"].get(h)
             for s in signals
-            if s.get("forward_returns") and s["forward_returns"].get(h) is not None
-        ]
-        if not rets:
-            out[h] = {"win_rate": None, "avg_return": None, "median_return": None, "sample": 0}
-            continue
-        wins = sum(1 for r in rets if r > 0)
-        s = sorted(rets)
-        mid = len(s) // 2
-        med = s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
-        out[h] = {
-            "win_rate": round(wins / len(rets) * 100, 1),
-            "avg_return": round(mean(rets), 2),
-            "median_return": round(med, 2),
-            "sample": len(rets),
-        }
-    return out
+            if s.get("forward_returns")
+        ])
+        for h in horizons
+    }

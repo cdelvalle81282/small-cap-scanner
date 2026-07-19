@@ -218,7 +218,8 @@ def performance(
     rows = [{
         "ticker": s["ticker"], "signal_type": s["signal_type"],
         "eps_change_pct": s.get("eps_change_pct"), "cross_date": s["trend_change_date"],
-        "entry_price": s.get("entry_price"),
+        "entry_price": s.get("entry_price"), "last_close": s.get("last_close"),
+        "current_return": s.get("current_return"), "days_held": s.get("days_held"),
         "forward_returns": s.get("forward_returns", {}),
     } for s in res["signals"]]
     return {"summary": res["summary"], "horizons": list(DEFAULT_HORIZONS), "signals": rows}
