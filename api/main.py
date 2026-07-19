@@ -29,6 +29,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def _revalidate_assets(request, call_next):
+    """Force the browser to revalidate JS/CSS so deploys are picked up immediately."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".js", ".css", ".html")):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
 @lru_cache(maxsize=1)
 def get_db() -> Database:
     db = Database(DB_PATH)

@@ -154,21 +154,30 @@ function drawChart(container, prices, cross, earnings) {
   chartRef = { candles, lines: [] };
 }
 
-// draw AI support/resistance + trend-break as horizontal price lines
+// draw AI support/resistance + trend-break as horizontal price lines (and always
+// show them as text under the chart, so they're visible even if a line fails)
 function applyLevels(root, levels, trendBreak) {
-  const c = chartRef.candles; if (!c) return;
-  chartRef.lines.forEach(l => { try { c.removePriceLine(l); } catch { /* */ } });
-  chartRef.lines = [];
+  const c = chartRef.candles;
+  const LS = (window.LightweightCharts && window.LightweightCharts.LineStyle)
+    ? window.LightweightCharts.LineStyle.Dashed : 2;
+  if (c) { chartRef.lines.forEach(l => { try { c.removePriceLine(l); } catch { /* */ } }); chartRef.lines = []; }
+
+  const addLine = (price, color, width, title) => {
+    const p = Number(price);
+    if (!isFinite(p) || !c) return;
+    try { chartRef.lines.push(c.createPriceLine({ price: p, color, lineWidth: width, lineStyle: LS, axisLabelVisible: true, title })); }
+    catch (e) { /* keep going — text note still shows the level */ }
+  };
+
   const note = [];
-  for (const lv of levels) {
+  for (const lv of (levels || [])) {
     if (lv.price == null) continue;
     const res = (lv.type || "").toLowerCase().startsWith("res");
-    chartRef.lines.push(c.createPriceLine({ price: lv.price, color: res ? "#f59e0b" : "#10b981",
-      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: (res ? "R " : "S ") + lv.price }));
+    addLine(lv.price, res ? "#f59e0b" : "#10b981", 1, `${res ? "R " : "S "}${lv.price}`);
     note.push(`<span style="color:${res ? "var(--amber)" : "var(--green)"}">${res ? "R" : "S"} $${lv.price}</span>`);
   }
   if (trendBreak != null) {
-    chartRef.lines.push(c.createPriceLine({ price: trendBreak, color: "#c084fc", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: "break " + trendBreak }));
+    addLine(trendBreak, "#c084fc", 2, `break ${trendBreak}`);
     note.push(`<span style="color:#c084fc">break $${trendBreak}</span>`);
   }
   const el = $("#levels-note", root);
