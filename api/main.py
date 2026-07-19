@@ -165,6 +165,35 @@ def _cached_scan(db: Database, cfg: ScannerConfig) -> list[dict]:
     return hit
 
 
+# The follow-through scan is the heaviest call in the app: a full-universe scan
+# plus a full price-history read per trigger (~100s cold). Its result only
+# changes when new price data lands, so cache it keyed on config + start + latest
+# price date, and serialise cold computes behind a lock so repeated clicks (or
+# both workers) can't stack N simultaneous 100s scans and saturate the box.
+_perf_cache: dict = {}
+_perf_lock = threading.Lock()
+
+
+def _perf_key(cfg: ScannerConfig, start: str, latest: str | None):
+    return _scan_key(cfg, latest) + (start,)
+
+
+def _cached_perf(db: Database, cfg: ScannerConfig, start: str) -> dict:
+    key = _perf_key(cfg, start, db.get_latest_price_date())
+    hit = _perf_cache.get(key)
+    if hit is not None:
+        return hit
+    with _perf_lock:
+        hit = _perf_cache.get(key)  # another thread may have filled it while we waited
+        if hit is not None:
+            return hit
+        if len(_perf_cache) > 8:
+            _perf_cache.clear()
+        res = follow_through(db, cfg, horizons=DEFAULT_HORIZONS, start_date=start)
+        _perf_cache[key] = res
+        return res
+
+
 @app.get("/api/signals")
 def signals(
     min_price: float | None = None, max_price: float | None = None,
@@ -194,11 +223,14 @@ def signals(
 
 @app.on_event("startup")
 def _prewarm():
-    """Warm the default-filter scan in the background so the first Overview /
-    Scanner load is instant instead of ~35s."""
+    """Warm the default-filter scan + Triggered track record in the background so
+    the first Overview / Scanner / Triggered load is instant instead of ~35–100s."""
     def run():
         try:
-            _cached_scan(get_db(), _build_config(1.0, 50.0, "50M", "10B", "20/50", 10.0, 30, "both"))
+            db = get_db()
+            cfg = _build_config(1.0, 50.0, "50M", "10B", "20/50", 10.0, 30, "both")
+            _cached_scan(db, cfg)
+            _cached_perf(db, cfg, "2022-01-01")
         except Exception:
             pass
     threading.Thread(target=run, daemon=True).start()
@@ -206,14 +238,17 @@ def _prewarm():
 
 @app.get("/api/performance")
 def performance(
-    min_price: float | None = None, max_price: float | None = None,
-    min_cap: str | None = None, max_cap: str | None = None,
+    min_price: float = 1.0, max_price: float = 50.0,
+    min_cap: str = "50M", max_cap: str = "10B",
     ma: str = "20/50", eps: float = 10.0, window: int = 30,
     direction: str = "both", start: str = "2022-01-01",
 ):
+    # Default to the same $1–50 / $50M–10B small-cap universe as the Scanner.
+    # Without this the follow-through scan spanned the entire DB (~11k triggers,
+    # ~100s), which is both off-purpose and what saturated the workers.
     db = get_db()
     cfg = _build_config(min_price, max_price, min_cap, max_cap, ma, eps, window, direction)
-    res = follow_through(db, cfg, horizons=DEFAULT_HORIZONS, start_date=start)
+    res = _cached_perf(db, cfg, start)
     # slim per-signal payload for the table
     rows = [{
         "ticker": s["ticker"], "signal_type": s["signal_type"],

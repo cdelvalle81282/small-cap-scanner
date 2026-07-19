@@ -5,6 +5,7 @@ import { $, pct, money, cls, crossLabel } from "../util.js";
 const state = {
   f: { ma: "20/50", eps: 10, window: 30, direction: "both", start: "2022-01-01" },
   data: null,
+  busy: false,
   sort: { key: "cross", dir: -1 },  // default: most recent trigger first
 };
 const HZ = [15, 30, 60, 90];
@@ -50,10 +51,33 @@ export async function render(root, ctx) {
 }
 
 async function run(root, ctx) {
+  if (state.busy) return;                       // ignore repeat clicks while computing
+  state.busy = true;
   state.f.eps = $("#eps", root).value; state.f.start = $("#start", root).value;
-  $("#body", root).innerHTML = `<div class="loading">Computing track record across every trigger — this runs a full historical scan, ~10–25s…</div>`;
+
+  const btn = $("#run", root);
+  btn.disabled = true; btn.classList.add("busy"); btn.textContent = "Computing…";
+  const t0 = Date.now();
+  $("#body", root).innerHTML = `
+    <div class="computing">
+      <div class="spinner"></div>
+      <div><b>Computing track record…</b>
+        <div class="sub">Running a full historical scan across every trigger. The first run for a
+          given filter can take a while; results are cached after that, so re-runs are instant.</div>
+        <div class="elapsed" id="elapsed">0s elapsed</div></div>
+    </div>`;
+  const tick = setInterval(() => {
+    const el = $("#elapsed", root);
+    if (el) el.textContent = `${Math.round((Date.now() - t0) / 1000)}s elapsed`;
+  }, 1000);
+
   try { state.data = await api.performance(state.f); paint(root, ctx); }
   catch (e) { $("#body", root).innerHTML = `<div class="loading">Error: ${e.message}</div>`; }
+  finally {
+    clearInterval(tick);
+    state.busy = false;
+    btn.disabled = false; btn.classList.remove("busy"); btn.textContent = "↗ Compute";
+  }
 }
 
 function meterColor(win) { return win >= 55 ? "var(--green)" : win >= 45 ? "var(--cyan)" : "var(--red)"; }
