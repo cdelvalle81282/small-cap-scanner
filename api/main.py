@@ -7,9 +7,11 @@ Run locally:  uvicorn api.main:app --reload --port 8600
 """
 from datetime import date
 from functools import lru_cache
+from pathlib import Path
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from config import DB_PATH, ScannerConfig
 from core.database import Database
@@ -187,3 +189,9 @@ def ticker(sym: str, cross_date: str | None = None, direction: str = "bullish"):
         "ai_analysis": db.get_ai_analysis(sym),
         "follow_through": ff,
     }
+
+
+# ── static frontend (mounted last so /api/* wins) ────────────
+_WEB = Path(__file__).parent.parent / "web"
+if _WEB.exists():
+    app.mount("/", StaticFiles(directory=str(_WEB), html=True), name="web")
