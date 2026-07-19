@@ -172,3 +172,49 @@ main{padding:18px 22px 60px;flex:1}
 @media(max-width:1180px){.scan-grid{grid-template-columns:1fr}.rail,.focus{position:static}.ft-cards,.ov-grid{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}.pulse::after{display:none}}
 ::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:3px}::-webkit-scrollbar-track{background:var(--bg)}
+
+/* ── Readability pass: larger text across the dashboard ────── */
+body{font-size:15px}
+.ai-text{font-size:15.5px;line-height:1.75}
+nav a{font-size:12px}
+.phead h3{font-size:12px}
+.crumb{font-size:13px}
+.lbl{font-size:11px}
+.chip{font-size:11px}
+.btn{font-size:12px}
+.count{font-size:13px}
+.count b{font-size:18px}
+.split{font-size:11px}
+.thead div{font-size:10px}
+.tk b{font-size:15px}
+.tk .co{font-size:12px}
+.eps{font-size:14.5px}
+.price{font-size:13.5px}
+.sub2{font-size:11px}
+.q .qv{font-size:15px}
+.ago{font-size:13px}
+.rvol b{font-size:13px}
+.kpi .v{font-size:20px}
+.kpi .k{font-size:9.5px}
+.stat .k{font-size:11px}
+.stat .v{font-size:34px}
+.stat .d{font-size:12.5px}
+.hcard .h{font-size:12px}
+.hcard .win{font-size:34px}
+.hcard .row{font-size:12px}
+.fx-tk b{font-size:22px}
+.fx-p{font-size:19px}
+.why .lbl{font-size:12px}
+.why .qbig{font-size:26px}
+.factor .fr{font-size:12.5px}
+.ft-tbl{font-size:13.5px}
+.ft-tbl th{font-size:10.5px}
+.ft-tbl td{padding:8px 13px}
+.dt-head h1{font-size:30px}
+.dt-head .co{font-size:14.5px}
+
+/* chart legend + AI levels note (detail view) */
+.legend{font-family:var(--mono);font-size:11px;color:var(--t2);display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-left:8px}
+#levels-note{padding:8px 15px;font-family:var(--mono);font-size:12.5px;color:var(--t3);border-top:1px solid var(--border)}
+#levels-note:empty{display:none;padding:0;border:none}

@@ -3,6 +3,7 @@ import { state } from "../state.js";
 import { $, pct, money, cls, mdLite, crossLabel } from "../util.js";
 
 const HZ = [15, 30, 60, 90];
+let chartRef = { candles: null, lines: [] };
 
 async function waitForCharts(ms = 3000) {
   const t0 = Date.now();
@@ -10,10 +11,15 @@ async function waitForCharts(ms = 3000) {
   return !!window.LightweightCharts;
 }
 
+function aiBody(ai, sig, sym) {
+  if (ai && ai.text) return `<div class="ai-text">${mdLite(ai.text)}</div>`;
+  return `<div style="color:var(--t3);font-family:var(--mono);font-size:12px">No saved AI analysis${sig ? " yet — click Analyze." : ` for ${sym}.`}</div>`;
+}
+
 export async function render(root, ctx, params) {
   const sym = (params.sym || "").toUpperCase();
   ctx.setCrumb("Detail · " + sym);
-  root.innerHTML = `<span class="dt-back" id="back">← Back to scanner</span><div class="loading">Loading ${sym}…</div>`;
+  root.innerHTML = `<span class="dt-back" id="back">← Back</span><div class="loading">Loading ${sym}…</div>`;
   $("#back", root).onclick = () => ctx.navigate("scanner");
 
   let d;
@@ -25,33 +31,36 @@ export async function render(root, ctx, params) {
   const ff = d.follow_through && d.follow_through.forward_returns;
   const ai = d.ai_analysis;
   const sig = (state.signal && state.signal.ticker === sym) ? state.signal : null;
+  const showFT = !!ff;
+
+  const ftPanel = showFT ? `
+    <div class="panel"><div class="phead"><h3>Follow-through · realized return</h3></div>
+      <div class="ft-cards" style="grid-template-columns:repeat(4,1fr);gap:10px;padding:14px">
+        ${HZ.map(h => { const v = ff[h];
+          return `<div class="hcard" style="padding:16px 10px"><div class="h">+${h}d</div>
+            <div class="win" style="font-size:26px;color:${v == null ? "var(--t3)" : (v >= 0 ? "var(--green)" : "var(--red)")}">${v == null ? "·" : pct(v, 1)}</div></div>`;
+        }).join("")}
+      </div></div>` : "";
 
   root.innerHTML = `
-    <span class="dt-back" id="back">← Back to scanner</span>
+    <span class="dt-back" id="back">← Back</span>
     <div class="dt-head"><h1>${sym}</h1><span class="co">${stock.name || ""}</span>
-      <span class="price" style="margin-left:auto;font-size:20px">${money(last)}</span>
+      <span class="price" style="margin-left:auto;font-size:22px">${money(last)}</span>
       ${sig ? `<span class="chip" id="watch" style="cursor:pointer">☆ Watch 30d</span>` : ""}</div>
 
-    <div class="two" style="margin-bottom:14px">
-      <div class="panel" style="grid-column:1 / -1"><div class="phead"><h3>Price · SMA overlay</h3>
-        ${params.cross ? `<span class="lbl">signal cross ${crossLabel(params.cross)}</span>` : ""}</div>
-        <div id="chart"></div></div>
+    <div class="panel" style="margin-bottom:14px">
+      <div class="phead"><h3>Price &amp; annotations</h3>
+        <span class="legend"><i style="background:#f59e0b"></i>SMA20 <i style="background:#22d3ee"></i>SMA50 <i style="background:#ef4444"></i>SMA200 <i style="background:#a78bfa"></i>EPS <i style="background:#c084fc"></i>cross</span></div>
+      <div id="chart"></div>
+      <div id="levels-note"></div>
     </div>
 
     <div class="two">
-      <div class="panel"><div class="phead"><h3>Follow-through</h3></div>
-        <div class="ft-cards" style="grid-template-columns:repeat(4,1fr);gap:10px;padding:12px">
-          ${HZ.map(h => {
-            const v = ff ? ff[h] : null;
-            return `<div class="hcard" style="padding:12px 10px"><div class="h">+${h}d</div>
-              <div class="win" style="font-size:22px;color:${v == null ? "var(--t3)" : (v >= 0 ? "var(--green)" : "var(--red)")}">${v == null ? "·" : pct(v, 1)}</div></div>`;
-          }).join("")}
-        </div>
-        ${ff ? "" : `<div style="padding:0 14px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">Open from a signal to see its realized returns.</div>`}
-      </div>
-      <div class="panel"><div class="phead"><h3>AI chart analysis</h3>
-        ${sig ? `<span class="chip on" id="analyze" style="cursor:pointer">${ai ? "↻ Re-run" : "✦ Analyze"}</span>` : (ai ? `<span class="lbl">saved ${ai.analysis_date || ""}</span>` : "")}</div>
-        <div style="padding:12px 15px" id="ai-body">${ai && ai.text ? `<div class="ai-text">${mdLite(ai.text)}</div>` : `<div style="color:var(--t3);font-family:var(--mono);font-size:11px">No saved AI analysis${sig ? " yet — click Analyze." : ` for ${sym}.`}</div>`}</div>
+      ${ftPanel}
+      <div class="panel" ${showFT ? "" : 'style="grid-column:1 / -1"'}>
+        <div class="phead"><h3>AI chart analysis</h3>
+          ${sig ? `<span class="chip on" id="analyze" style="cursor:pointer">${ai ? "↻ Re-run" : "✦ Analyze"}</span>` : (ai ? `<span class="lbl">saved ${ai.analysis_date || ""}</span>` : "")}</div>
+        <div style="padding:14px 16px" id="ai-body">${aiBody(ai, sig, sym)}</div>
       </div>
     </div>`;
   $("#back", root).onclick = () => ctx.navigate("scanner");
@@ -64,9 +73,8 @@ export async function render(root, ctx, params) {
       const res = await api.analyze({ ticker: sym, signal_type: sig.signal_type, eps_change_pct: sig.eps_change_pct,
         eps_change_date: sig.eps_change_date || "", trend_change_date: sig.trend_change_date,
         fast_ma: sig.fast_ma, slow_ma: sig.slow_ma, days_between: sig.days_between });
-      b.innerHTML = res.error
-        ? `<div style="color:var(--red);font-family:var(--mono);font-size:11px">Error: ${res.error}</div>`
-        : `<div class="ai-text">${mdLite(res.text)}</div>`;
+      if (res.error) { b.innerHTML = `<div style="color:var(--red);font-family:var(--mono);font-size:12px">Error: ${res.error}</div>`; }
+      else { b.innerHTML = `<div class="ai-text">${mdLite(res.text)}</div>`; applyLevels(root, res.levels || [], res.trend_break_price); }
     } catch (e) { b.innerHTML = `<div style="color:var(--red)">Error: ${e.message}</div>`; }
     az.textContent = "↻ Re-run";
   };
@@ -80,48 +88,89 @@ export async function render(root, ctx, params) {
     } catch { wb.textContent = "✕ failed"; }
   };
 
-  // chart
   if (await waitForCharts() && d.prices.length) {
-    drawChart($("#chart", root), d.prices, params.cross);
+    drawChart($("#chart", root), d.prices, params.cross, d.earnings || []);
+    if (ai && ai.levels && ai.levels.length) applyLevels(root, ai.levels, ai.trend_break_price);
   } else if (d.prices.length) {
     $("#chart", root).innerHTML = `<div class="loading">Chart library unavailable</div>`;
   }
 }
 
-function sma(prices, period, key = "c") {
+function sma(prices, period) {
   const out = []; let sum = 0;
   for (let i = 0; i < prices.length; i++) {
-    sum += prices[i][key];
-    if (i >= period) sum -= prices[i - period][key];
-    out.push(i >= period - 1 ? { time: prices[i].date, value: +(sum / period).toFixed(4) } : null);
+    sum += prices[i].c;
+    if (i >= period) sum -= prices[i - period].c;
+    if (i >= period - 1) out.push({ time: prices[i].date, value: +(sum / period).toFixed(4) });
   }
-  return out.filter(Boolean);
+  return out;
 }
 
-function drawChart(container, prices, cross) {
+// nearest trading-day bar on or before a target date (EPS often lands off-session)
+function snapToBar(dates, target) {
+  if (!dates.length) return target;
+  if (target <= dates[0]) return dates[0];
+  if (target >= dates[dates.length - 1]) return dates[dates.length - 1];
+  let lo = 0, hi = dates.length - 1, ans = dates[0];
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (dates[m] <= target) { ans = dates[m]; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+
+function drawChart(container, prices, cross, earnings) {
   const LC = window.LightweightCharts;
+  container.innerHTML = "";
   const chart = LC.createChart(container, {
-    height: 340, autoSize: true,
-    layout: { background: { color: "transparent" }, textColor: "#93a4bd", fontFamily: "ui-monospace, monospace", fontSize: 10 },
+    height: 360, autoSize: true,
+    layout: { background: { color: "transparent" }, textColor: "#93a4bd", fontFamily: "ui-monospace, monospace", fontSize: 11 },
     grid: { vertLines: { color: "rgba(255,255,255,.03)" }, horzLines: { color: "rgba(255,255,255,.05)" } },
-    rightPriceScale: { borderColor: "#1d2c44" },
-    timeScale: { borderColor: "#1d2c44" },
-    crosshair: { mode: 0 },
+    rightPriceScale: { borderColor: "#1d2c44" }, timeScale: { borderColor: "#1d2c44" }, crosshair: { mode: 0 },
   });
-  const candles = chart.addCandlestickSeries({
-    upColor: "#10b981", downColor: "#f43f5e", borderVisible: false, wickUpColor: "#10b981", wickDownColor: "#f43f5e",
-  });
+  const candles = chart.addCandlestickSeries({ upColor: "#10b981", downColor: "#f43f5e", borderVisible: false, wickUpColor: "#10b981", wickDownColor: "#f43f5e" });
   candles.setData(prices.map(p => ({ time: p.date, open: p.o, high: p.h, low: p.l, close: p.c })));
 
   const vol = chart.addHistogramSeries({ priceScaleId: "", priceFormat: { type: "volume" } });
-  chart.priceScale("").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-  vol.setData(prices.map(p => ({ time: p.date, value: p.v, color: p.c >= p.o ? "rgba(16,185,129,.4)" : "rgba(244,63,94,.4)" })));
+  chart.priceScale("").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+  vol.setData(prices.map(p => ({ time: p.date, value: p.v, color: p.c >= p.o ? "rgba(16,185,129,.35)" : "rgba(244,63,94,.35)" })));
 
   chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(sma(prices, 20));
   chart.addLineSeries({ color: "#22d3ee", lineWidth: 1, priceLineVisible: false, lastValueVisible: false }).setData(sma(prices, 50));
+  chart.addLineSeries({ color: "#ef4444", lineWidth: 2, priceLineVisible: false, lastValueVisible: false }).setData(sma(prices, 200));
 
-  if (cross) {
-    candles.setMarkers([{ time: cross, position: "aboveBar", color: "#a78bfa", shape: "arrowDown", text: "cross" }]);
+  // markers: every earnings report (▲ beat / ▼ miss) + the MA crossover
+  const dates = prices.map(p => p.date);
+  const markers = [];
+  for (const e of earnings) {
+    const rd = (e.report_date || "").slice(0, 10);
+    if (!rd || rd < dates[0] || rd > dates[dates.length - 1]) continue;
+    const chg = e.eps_change_pct;
+    markers.push({ time: snapToBar(dates, rd), position: "belowBar", color: "#a78bfa", shape: "circle",
+      text: "EPS " + (chg == null ? "" : (chg >= 0 ? "+" : "") + Math.round(chg) + "%") });
   }
+  if (cross) markers.push({ time: snapToBar(dates, cross), position: "aboveBar", color: "#c084fc", shape: "arrowDown", text: "MA cross" });
+  markers.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
+  candles.setMarkers(markers);
+
   chart.timeScale().fitContent();
+  chartRef = { candles, lines: [] };
+}
+
+// draw AI support/resistance + trend-break as horizontal price lines
+function applyLevels(root, levels, trendBreak) {
+  const c = chartRef.candles; if (!c) return;
+  chartRef.lines.forEach(l => { try { c.removePriceLine(l); } catch { /* */ } });
+  chartRef.lines = [];
+  const note = [];
+  for (const lv of levels) {
+    if (lv.price == null) continue;
+    const res = (lv.type || "").toLowerCase().startsWith("res");
+    chartRef.lines.push(c.createPriceLine({ price: lv.price, color: res ? "#f59e0b" : "#10b981",
+      lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: (res ? "R " : "S ") + lv.price }));
+    note.push(`<span style="color:${res ? "var(--amber)" : "var(--green)"}">${res ? "R" : "S"} $${lv.price}</span>`);
+  }
+  if (trendBreak != null) {
+    chartRef.lines.push(c.createPriceLine({ price: trendBreak, color: "#c084fc", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: "break " + trendBreak }));
+    note.push(`<span style="color:#c084fc">break $${trendBreak}</span>`);
+  }
+  const el = $("#levels-note", root);
+  if (el) el.innerHTML = note.length ? `AI levels: ${note.join(" · ")}` : "";
 }
