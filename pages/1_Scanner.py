@@ -23,6 +23,24 @@ def get_db() -> Database:
     return db
 
 
+@st.cache_data(show_spinner=False)
+def _run_scan_cached(_db: Database, config_key: tuple, as_of_date: str, data_version: str) -> list[dict]:
+    (min_price, max_price, min_market_cap, max_market_cap,
+     ma_pair, eps_change_threshold, trend_window_days, direction) = config_key
+    config = ScannerConfig(
+        min_price=min_price,
+        max_price=max_price,
+        min_market_cap=min_market_cap,
+        max_market_cap=max_market_cap,
+        ma_crossover_pairs=[ma_pair],
+        eps_change_threshold=eps_change_threshold,
+        trend_window_days=trend_window_days,
+        direction=direction,
+    )
+    scanner = Scanner(db=_db, config=config)
+    return scanner.scan(as_of_date)
+
+
 db = get_db()
 
 st.title("Small Cap Scanner")
@@ -186,21 +204,21 @@ if db_alerts:
 # ── Manual scan ───────────────────────────────────────────────────────────────
 if run_scan and not errors:
     ma_pair = MA_PAIR_OPTIONS[ma_pair_label]
-    config = ScannerConfig(
-        min_price=min_price if min_price is not None else 0.0,
-        max_price=max_price if max_price is not None else 1_000_000.0,
-        min_market_cap=min_cap if min_cap is not None else 0.0,
-        max_market_cap=max_cap if max_cap is not None else 100_000_000_000_000.0,
-        ma_crossover_pairs=[ma_pair],
-        eps_change_threshold=float(eps_threshold),
-        trend_window_days=trend_window,
-        direction=direction,
+    config_key = (
+        min_price if min_price is not None else 0.0,
+        max_price if max_price is not None else 1_000_000.0,
+        min_cap if min_cap is not None else 0.0,
+        max_cap if max_cap is not None else 100_000_000_000_000.0,
+        ma_pair,
+        float(eps_threshold),
+        trend_window,
+        direction,
     )
-    scanner = Scanner(db=db, config=config)
     as_of_date = datetime.now().strftime("%Y-%m-%d")
+    data_version = db.get_latest_price_date() or ""
 
     with st.spinner("Scanning..."):
-        all_signals = scanner.scan(as_of_date)
+        all_signals = _run_scan_cached(db, config_key, as_of_date, data_version)
 
     # Keep most recent per ticker from this scan
     scan_latest: dict[str, dict] = {}

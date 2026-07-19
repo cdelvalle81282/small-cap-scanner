@@ -24,6 +24,18 @@ class Database:
         finally:
             conn.close()
 
+    @contextmanager
+    def read_connection(self):
+        """Single shared connection for callers doing many reads (e.g. a scan loop)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            yield conn
+        finally:
+            conn.close()
+
     def initialize(self) -> None:
         with self._connect() as conn:
             conn.executescript("""
@@ -240,6 +252,21 @@ class Database:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_price_history(self, ticker: str, conn: sqlite3.Connection | None = None) -> list[dict]:
+        """All daily_prices rows for one ticker, date-ordered. Pass `conn` to reuse a shared connection."""
+        query = "SELECT * FROM daily_prices WHERE ticker = ? ORDER BY date"
+        if conn is not None:
+            rows = conn.execute(query, (ticker,)).fetchall()
+            return [dict(row) for row in rows]
+        with self._connect() as conn:
+            rows = conn.execute(query, (ticker,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_latest_price_date(self) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(date) FROM daily_prices").fetchone()
+        return row[0] if row else None
+
     def insert_earnings(self, rows: list[dict]) -> None:
         with self._connect() as conn:
             for row in rows:
@@ -260,6 +287,24 @@ class Database:
                 (ticker,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_earnings_bulk(self, tickers: list[str]) -> dict[str, list[dict]]:
+        if not tickers:
+            return {}
+        placeholders = ",".join("?" * len(tickers))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM earnings
+                WHERE ticker IN ({placeholders})
+                ORDER BY ticker, report_date
+                """,
+                tickers,
+            ).fetchall()
+        result: dict[str, list[dict]] = {}
+        for row in rows:
+            result.setdefault(row["ticker"], []).append(dict(row))
+        return result
 
     def insert_fundamentals(self, rows: list[dict]) -> None:
         with self._connect() as conn:

@@ -1,5 +1,7 @@
+import sqlite3
 from datetime import date, timedelta
 
+import numpy as np
 import pandas as pd
 
 from config import ScannerConfig
@@ -18,34 +20,54 @@ class Scanner:
             min_market_cap=self.config.min_market_cap,
             max_market_cap=self.config.max_market_cap,
         )
+        tickers = [row["ticker"] for row in universe]
+        earnings_by_ticker = self.db.get_earnings_bulk(tickers)
+
         signals: list[dict] = []
-        for row in universe:
-            signals.extend(self._check_ticker(row["ticker"], as_of_date))
+        with self.db.read_connection() as conn:
+            for ticker in tickers:
+                signals.extend(
+                    self._check_ticker(ticker, earnings_by_ticker.get(ticker, []), as_of_date, conn)
+                )
         return signals
 
-    def _check_ticker(self, ticker: str, as_of_date: str) -> list[dict]:
-        earnings = self.db.get_earnings(ticker)
-        signals: list[dict] = []
-
+    def _check_ticker(
+        self,
+        ticker: str,
+        earnings: list[dict],
+        as_of_date: str,
+        conn: sqlite3.Connection,
+    ) -> list[dict]:
+        qualifying = []
         for earning in earnings:
             eps_change = earning.get("eps_change_pct")
             if eps_change is None:
                 continue
             if abs(eps_change) < self.config.eps_change_threshold:
                 continue
-
-            eps_date = earning["report_date"]
-            # Only look at earnings on or before as_of_date
-            if eps_date > as_of_date:
+            if earning["report_date"] > as_of_date:
                 continue
+            qualifying.append((earning["report_date"], eps_change))
 
+        if not qualifying:
+            return []
+
+        rows = self.db.get_price_history(ticker, conn=conn)
+        if not rows:
+            return []
+
+        # Fetch the ticker's price history ONCE and reuse it (via fast binary search on
+        # `dates`) for every earning x MA-pair combo below, instead of re-querying per combo.
+        df = pd.DataFrame(rows)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date").reset_index(drop=True)
+        dates = df["date"].to_numpy()
+
+        signals: list[dict] = []
+        for eps_date, eps_change in qualifying:
             for fast_period, slow_period in self.config.ma_crossover_pairs:
                 crossover = self._find_ma_crossover(
-                    ticker,
-                    eps_date,
-                    fast_period,
-                    slow_period,
-                    self.config.trend_window_days,
+                    df, dates, eps_date, fast_period, slow_period, self.config.trend_window_days,
                 )
                 if crossover is None:
                     continue
@@ -70,7 +92,8 @@ class Scanner:
 
     def _find_ma_crossover(
         self,
-        ticker: str,
+        df: pd.DataFrame,
+        dates: np.ndarray,
         eps_date: str,
         fast_period: int,
         slow_period: int,
@@ -78,54 +101,48 @@ class Scanner:
     ) -> dict | None:
         eps_dt = date.fromisoformat(eps_date)
 
-        # Fetch enough history to compute the slow MA before the window starts
+        # Match the original per-earning fetch bounds exactly: MAs are only warmed up
+        # from rows inside [fetch_start, fetch_end], not the ticker's full history. A
+        # ticker with a data gap in that span can have fewer than `slow_period` valid
+        # rows here even though earlier history exists, which changes where the MA
+        # becomes non-NaN — so this window must be reproduced rather than computed
+        # over the full series.
         fetch_start = eps_dt - timedelta(days=slow_period + window_days + 30)
         fetch_end = eps_dt + timedelta(days=window_days)
-
-        rows = self.db.get_daily_prices(
-            ticker,
-            fetch_start.isoformat(),
-            fetch_end.isoformat(),
-        )
-        if len(rows) < slow_period:
+        lo = np.searchsorted(dates, pd.Timestamp(fetch_start).to_datetime64(), side="left")
+        hi = np.searchsorted(dates, pd.Timestamp(fetch_end).to_datetime64(), side="right")
+        if hi - lo < slow_period:
             return None
 
-        df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").reset_index(drop=True)
-        df["sma_fast"] = df["close"].rolling(window=fast_period, min_periods=fast_period).mean()
-        df["sma_slow"] = df["close"].rolling(window=slow_period, min_periods=slow_period).mean()
+        sub = df.iloc[lo:hi]
+        sma_fast = sub["close"].rolling(window=fast_period, min_periods=fast_period).mean().to_numpy()
+        sma_slow = sub["close"].rolling(window=slow_period, min_periods=slow_period).mean().to_numpy()
 
         # Only count crossovers that happen AFTER the EPS report
-        window_start = eps_dt
-        window_end = eps_dt + timedelta(days=window_days)
-        mask = (df["date"].dt.date >= window_start) & (df["date"].dt.date <= window_end)
-        window_df = df[mask].dropna(subset=["sma_fast", "sma_slow"]).reset_index(drop=True)
+        window_start = pd.Timestamp(eps_dt).to_datetime64()
+        window_end = pd.Timestamp(eps_dt + timedelta(days=window_days)).to_datetime64()
+        sub_dates = dates[lo:hi]
+        w_lo = np.searchsorted(sub_dates, window_start, side="left")
+        w_hi = np.searchsorted(sub_dates, window_end, side="right")
 
-        if len(window_df) < 2:
+        valid = ~(np.isnan(sma_fast[w_lo:w_hi]) | np.isnan(sma_slow[w_lo:w_hi]))
+        idxs = np.arange(w_lo, w_hi)[valid]
+        if len(idxs) < 2:
             return None
 
-        # Walk through consecutive pairs to find the first crossover
-        for i in range(1, len(window_df)):
-            prev = window_df.iloc[i - 1]
-            curr = window_df.iloc[i]
+        # First consecutive pair where fast crosses slow (prev_above -> curr_above changes)
+        above = sma_fast[idxs] > sma_slow[idxs]
+        transitions = np.diff(above.astype(np.int8))
+        crossings = np.flatnonzero(transitions)
+        if crossings.size == 0:
+            return None
 
-            prev_above = prev["sma_fast"] > prev["sma_slow"]
-            curr_above = curr["sma_fast"] > curr["sma_slow"]
-
-            if not prev_above and curr_above:
-                direction = "bullish"
-            elif prev_above and not curr_above:
-                direction = "bearish"
-            else:
-                continue
-
-            cross_date = curr["date"].date()
-            days_between = abs((cross_date - eps_dt).days)
-            return {
-                "date": cross_date.isoformat(),
-                "direction": direction,
-                "days_between": days_between,
-            }
-
-        return None
+        first = crossings[0]
+        direction = "bullish" if transitions[first] > 0 else "bearish"
+        cross_date = sub["date"].iloc[idxs[first + 1]].date()
+        days_between = abs((cross_date - eps_dt).days)
+        return {
+            "date": cross_date.isoformat(),
+            "direction": direction,
+            "days_between": days_between,
+        }
