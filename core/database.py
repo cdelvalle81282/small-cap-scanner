@@ -375,10 +375,11 @@ class Database:
                     GROUP BY ticker
                 ),
                 latest AS (
-                    SELECT ticker, close AS latest_close
+                    SELECT ticker, close AS latest_close, volume AS latest_volume
                     FROM recent WHERE rn = 1
                 )
-                SELECT s.ticker, s.market_cap, l.latest_close, a.avg_dollar_vol, a.avg_volume
+                SELECT s.ticker, s.name, s.market_cap, l.latest_close, l.latest_volume,
+                       a.avg_dollar_vol, a.avg_volume
                 FROM stocks s
                 LEFT JOIN latest l ON l.ticker = s.ticker
                 LEFT JOIN avg_dvol a ON a.ticker = s.ticker
@@ -387,6 +388,28 @@ class Database:
                 tickers + tickers,
             ).fetchall()
         return {row["ticker"]: dict(row) for row in rows}
+
+    def get_recent_closes(self, tickers: list[str], days: int = 90) -> dict[str, list[float]]:
+        """Last `days` closing prices per ticker, chronological. One query — for sparklines."""
+        if not tickers:
+            return {}
+        placeholders = ",".join("?" * len(tickers))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH ranked AS (
+                    SELECT ticker, date, close,
+                           ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn
+                    FROM daily_prices WHERE ticker IN ({placeholders})
+                )
+                SELECT ticker, close FROM ranked WHERE rn <= ? ORDER BY ticker, date
+                """,
+                tickers + [days],
+            ).fetchall()
+        out: dict[str, list[float]] = {}
+        for r in rows:
+            out.setdefault(r["ticker"], []).append(r["close"])
+        return out
 
     def save_scan_results(self, results: list[dict]) -> None:
         with self._connect() as conn:
