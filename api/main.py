@@ -6,6 +6,7 @@ Streamlit app during the migration; nginx flips to it once the frontend is ready
 Run locally:  uvicorn api.main:app --reload --port 8600
 """
 import json
+import threading
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -93,19 +94,21 @@ def meta():
     }
 
 
-@app.get("/api/signals")
-def signals(
-    min_price: float | None = None, max_price: float | None = None,
-    min_cap: str | None = None, max_cap: str | None = None,
-    ma: str = "20/50", eps: float = 10.0, window: int = 30,
-    direction: str = "both", recency: int = 30, sort: str = "score",
-):
-    db = get_db()
-    cfg = _build_config(min_price, max_price, min_cap, max_cap, ma, eps, window, direction)
-    as_of = date.today().isoformat()
-    raw = Scanner(db, cfg).scan(as_of)
+# A scan over the full universe takes ~35s, but the result only changes when new
+# price data lands (nightly). Cache the enriched scan keyed on the scan config +
+# latest price date; recency filter and sort are applied cheaply per request.
+_scan_cache: dict = {}
 
-    # most-recent signal per ticker, then recency filter on the crossover date
+
+def _scan_key(cfg: ScannerConfig, latest: str | None):
+    return (cfg.min_price, cfg.max_price, cfg.min_market_cap, cfg.max_market_cap,
+            tuple(cfg.ma_crossover_pairs), cfg.eps_change_threshold,
+            cfg.trend_window_days, cfg.direction, latest)
+
+
+def _scan_enriched(db: Database, cfg: ScannerConfig) -> list[dict]:
+    """Scan + dedup (most recent per ticker) + enrich + score + sparkline. Expensive."""
+    raw = Scanner(db, cfg).scan(date.today().isoformat())
     latest: dict[str, dict] = {}
     for s in raw:
         cd = s.get("trend_change_date")
@@ -113,12 +116,10 @@ def signals(
             continue
         if s["ticker"] not in latest or cd > latest[s["ticker"]]["trend_change_date"]:
             latest[s["ticker"]] = s
-    rows = [s for s in latest.values() if (_days_ago(s["trend_change_date"]) or 999) <= recency]
-
+    rows = list(latest.values())
     tickers = [s["ticker"] for s in rows]
     enrich = db.get_signal_enrichment(tickers)
     sparks = db.get_recent_closes(tickers, 90)
-
     out = []
     for s in rows:
         e = enrich.get(s["ticker"], {})
@@ -135,22 +136,62 @@ def signals(
             "signal_type": s["signal_type"], "fast_ma": s["fast_ma"], "slow_ma": s["slow_ma"],
             "eps_change_pct": s.get("eps_change_pct"), "eps_change_date": s.get("eps_change_date"),
             "trend_change_date": s["trend_change_date"], "days_between": s.get("days_between"),
-            "days_ago": _days_ago(s["trend_change_date"]),
             "market_cap": e.get("market_cap"), "latest_close": e.get("latest_close"),
             "avg_dollar_vol": e.get("avg_dollar_vol"), "avg_volume": avgv, "rvol": rvol,
             "score": q["score"], "factors": q["factors"],
             "spark": sparks.get(s["ticker"], []),
         })
+    return out
+
+
+def _cached_scan(db: Database, cfg: ScannerConfig) -> list[dict]:
+    key = _scan_key(cfg, db.get_latest_price_date())
+    hit = _scan_cache.get(key)
+    if hit is None:
+        if len(_scan_cache) > 16:
+            _scan_cache.clear()
+        hit = _scan_enriched(db, cfg)
+        _scan_cache[key] = hit
+    return hit
+
+
+@app.get("/api/signals")
+def signals(
+    min_price: float | None = None, max_price: float | None = None,
+    min_cap: str | None = None, max_cap: str | None = None,
+    ma: str = "20/50", eps: float = 10.0, window: int = 30,
+    direction: str = "both", recency: int = 30, sort: str = "score",
+):
+    db = get_db()
+    cfg = _build_config(min_price, max_price, min_cap, max_cap, ma, eps, window, direction)
+    enriched = _cached_scan(db, cfg)
+
+    rows = []
+    for s in enriched:
+        da = _days_ago(s["trend_change_date"])
+        if da is not None and da <= recency:
+            rows.append({**s, "days_ago": da})
 
     keys = {
         "score": lambda r: r["score"], "cross": lambda r: r["trend_change_date"],
         "eps": lambda r: abs(r.get("eps_change_pct") or 0), "rvol": lambda r: r.get("rvol") or 0,
         "dvol": lambda r: r.get("avg_dollar_vol") or 0,
     }
-    out.sort(key=keys.get(sort, keys["score"]), reverse=True)
+    rows.sort(key=keys.get(sort, keys["score"]), reverse=True)
+    bull = sum(1 for r in rows if r["signal_type"] == "bullish")
+    return {"count": len(rows), "bullish": bull, "bearish": len(rows) - bull, "signals": rows}
 
-    bull = sum(1 for r in out if r["signal_type"] == "bullish")
-    return {"count": len(out), "bullish": bull, "bearish": len(out) - bull, "signals": out}
+
+@app.on_event("startup")
+def _prewarm():
+    """Warm the default-filter scan in the background so the first Overview /
+    Scanner load is instant instead of ~35s."""
+    def run():
+        try:
+            _cached_scan(get_db(), _build_config(1.0, 50.0, "50M", "10B", "20/50", 10.0, 30, "both"))
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True).start()
 
 
 @app.get("/api/performance")
