@@ -17,7 +17,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from config import DB_PATH, ScannerConfig
-from core.chart_analyzer import analyze_chart, build_signal_chart
 from core.database import Database
 from core.performance import DEFAULT_HORIZONS, follow_through, ticker_follow_through
 from core.scanner import Scanner
@@ -310,6 +309,10 @@ class AnalyzeReq(BaseModel):
 
 @app.post("/api/analyze")
 def analyze(r: AnalyzeReq):
+    # lazy import: pulls in plotly/kaleido/anthropic only when AI is actually used,
+    # keeping worker startup fast
+    from core.chart_analyzer import analyze_chart, build_signal_chart
+
     db = get_db()
     sym = r.ticker.upper()
     rows = db.get_daily_prices(sym, "2020-01-01", date.today().isoformat())
