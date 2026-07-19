@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 
 import anthropic
 
-_MODEL = "claude-sonnet-4-6"
+_MODEL = "claude-sonnet-5"
 
 
 def build_signal_chart(
@@ -254,7 +254,10 @@ Be specific and concise. Reference price levels where visible."""
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model=_MODEL,
-        max_tokens=1500,
+        max_tokens=2500,
+        # Sonnet 5 runs adaptive thinking by default; disable it so the whole
+        # token budget goes to the answer (this is a fast, structured read).
+        thinking={"type": "disabled"},
         messages=[{
             "role": "user",
             "content": [
@@ -271,7 +274,12 @@ Be specific and concise. Reference price levels where visible."""
         }],
     )
 
-    response_text = message.content[0].text
+    # Sonnet 5 can return a thinking block before the text block, so grab the
+    # first text block rather than assuming content[0].
+    response_text = next(
+        (block.text for block in message.content if getattr(block, "type", None) == "text"),
+        "",
+    )
 
     # Parse the structured JSON block
     json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
