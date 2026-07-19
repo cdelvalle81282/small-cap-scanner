@@ -151,33 +151,37 @@ function drawChart(container, prices, cross, earnings) {
   candles.setMarkers(markers);
 
   chart.timeScale().fitContent();
-  chartRef = { candles, lines: [] };
+  chartRef = { chart, candles, firstTime: prices[0].date, lastTime: prices[prices.length - 1].date, levelSeries: [] };
 }
 
-// draw AI support/resistance + trend-break as horizontal price lines (and always
-// show them as text under the chart, so they're visible even if a line fails)
+// draw AI support/resistance + trend-break as horizontal lines. Drawn as line
+// series (the same mechanism as the moving averages, which render reliably),
+// spanning the full time range — plus a text readout under the chart.
 function applyLevels(root, levels, trendBreak) {
-  const c = chartRef.candles;
-  const LS = (window.LightweightCharts && window.LightweightCharts.LineStyle)
-    ? window.LightweightCharts.LineStyle.Dashed : 2;
-  if (c) { chartRef.lines.forEach(l => { try { c.removePriceLine(l); } catch { /* */ } }); chartRef.lines = []; }
+  const chart = chartRef.chart;
+  (chartRef.levelSeries || []).forEach(s => { try { chart.removeSeries(s); } catch { /* */ } });
+  chartRef.levelSeries = [];
+  const t0 = chartRef.firstTime, t1 = chartRef.lastTime;
 
-  const addLine = (price, color, width, title) => {
+  const draw = (price, color, width) => {
     const p = Number(price);
-    if (!isFinite(p) || !c) return;
-    try { chartRef.lines.push(c.createPriceLine({ price: p, color, lineWidth: width, lineStyle: LS, axisLabelVisible: true, title })); }
-    catch (e) { /* keep going — text note still shows the level */ }
+    if (!isFinite(p) || !chart || !t0) return;
+    try {
+      const s = chart.addLineSeries({ color, lineWidth: width, lineStyle: 2, priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false });
+      s.setData([{ time: t0, value: p }, { time: t1, value: p }]);
+      chartRef.levelSeries.push(s);
+    } catch (e) { /* text note still shows */ }
   };
 
   const note = [];
   for (const lv of (levels || [])) {
     if (lv.price == null) continue;
     const res = (lv.type || "").toLowerCase().startsWith("res");
-    addLine(lv.price, res ? "#f59e0b" : "#10b981", 1, `${res ? "R " : "S "}${lv.price}`);
+    draw(lv.price, res ? "#f59e0b" : "#10b981", 1);
     note.push(`<span style="color:${res ? "var(--amber)" : "var(--green)"}">${res ? "R" : "S"} $${lv.price}</span>`);
   }
   if (trendBreak != null) {
-    addLine(trendBreak, "#c084fc", 2, `break ${trendBreak}`);
+    draw(trendBreak, "#c084fc", 2);
     note.push(`<span style="color:#c084fc">break $${trendBreak}</span>`);
   }
   const el = $("#levels-note", root);
