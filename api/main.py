@@ -5,15 +5,19 @@ Streamlit app during the migration; nginx flips to it once the frontend is ready
 
 Run locally:  uvicorn api.main:app --reload --port 8600
 """
-from datetime import date
+import json
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+import pandas as pd
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from config import DB_PATH, ScannerConfig
+from core.chart_analyzer import analyze_chart, build_signal_chart
 from core.database import Database
 from core.performance import DEFAULT_HORIZONS, follow_through, ticker_follow_through
 from core.scanner import Scanner
@@ -189,6 +193,139 @@ def ticker(sym: str, cross_date: str | None = None, direction: str = "bullish"):
         "ai_analysis": db.get_ai_analysis(sym),
         "follow_through": ff,
     }
+
+
+# ── watchlist ────────────────────────────────────────────────
+class WatchReq(BaseModel):
+    ticker: str
+    signal_type: str
+    eps_change_pct: float | None = None
+    eps_date: str = ""
+    signal_date: str = ""
+    fast_ma: int | None = None
+    slow_ma: int | None = None
+
+
+@app.get("/api/watchlist")
+def watchlist():
+    return {"watchlist": get_db().get_watchlist(active_only=True)}
+
+
+@app.post("/api/watchlist")
+def watch_add(r: WatchReq):
+    db = get_db()
+    try:
+        exp = (date.fromisoformat(r.eps_date) + timedelta(days=30)).isoformat() if r.eps_date \
+            else (date.today() + timedelta(days=30)).isoformat()
+    except Exception:
+        exp = (date.today() + timedelta(days=30)).isoformat()
+    ai = db.get_ai_analysis(r.ticker.upper()) or {}
+    wid = db.add_to_watchlist({
+        "ticker": r.ticker.upper(), "signal_type": r.signal_type, "eps_change_pct": r.eps_change_pct,
+        "eps_date": r.eps_date, "signal_date": r.signal_date, "fast_ma": r.fast_ma, "slow_ma": r.slow_ma,
+        "levels_json": json.dumps(ai.get("levels", [])), "trend_break_price": ai.get("trend_break_price"),
+        "trend_break_condition": ai.get("trend_break_condition", ""), "ai_analysis": ai.get("text", ""),
+        "expiry_date": exp, "added_date": date.today().isoformat(),
+    })
+    return {"id": wid, "expiry_date": exp}
+
+
+@app.delete("/api/watchlist/{wid}")
+def watch_remove(wid: int):
+    get_db().remove_from_watchlist(wid)
+    return {"ok": True}
+
+
+# ── trades ───────────────────────────────────────────────────
+class TradeReq(BaseModel):
+    ticker: str
+    direction: str
+    entry_date: str
+    entry_price: float
+    shares: float | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
+    notes: str | None = None
+    signal_type: str | None = None
+    eps_change_pct: float | None = None
+    eps_date: str | None = None
+
+
+class CloseReq(BaseModel):
+    exit_date: str
+    exit_price: float
+
+
+@app.get("/api/trades")
+def trades():
+    return {"trades": get_db().get_trades()}
+
+
+@app.post("/api/trades")
+def trade_add(r: TradeReq):
+    tid = get_db().add_trade({
+        "ticker": r.ticker.upper(), "direction": r.direction, "status": "open",
+        "entry_date": r.entry_date, "entry_price": r.entry_price, "shares": r.shares,
+        "stop_price": r.stop_price, "target_price": r.target_price, "exit_date": None, "exit_price": None,
+        "notes": r.notes, "signal_type": r.signal_type, "eps_change_pct": r.eps_change_pct,
+        "eps_date": r.eps_date, "added_date": date.today().isoformat(),
+    })
+    return {"id": tid}
+
+
+@app.post("/api/trades/{tid}/close")
+def trade_close(tid: int, r: CloseReq):
+    get_db().close_trade(tid, r.exit_date, r.exit_price)
+    return {"ok": True}
+
+
+@app.delete("/api/trades/{tid}")
+def trade_delete(tid: int):
+    get_db().delete_trade(tid)
+    return {"ok": True}
+
+
+# ── alerts ───────────────────────────────────────────────────
+@app.get("/api/alerts")
+def alerts():
+    db = get_db()
+    today = date.today()
+    return {
+        "signal_alerts": db.get_signal_alerts((today - timedelta(days=30)).isoformat(), today.isoformat()),
+        "price_alerts": db.get_all_alerts(),
+    }
+
+
+# ── live AI analysis ─────────────────────────────────────────
+class AnalyzeReq(BaseModel):
+    ticker: str
+    signal_type: str
+    eps_change_pct: float | None = None
+    eps_change_date: str
+    trend_change_date: str
+    fast_ma: int
+    slow_ma: int
+    days_between: int | None = None
+
+
+@app.post("/api/analyze")
+def analyze(r: AnalyzeReq):
+    db = get_db()
+    sym = r.ticker.upper()
+    rows = db.get_daily_prices(sym, "2020-01-01", date.today().isoformat())
+    if not rows:
+        return {"error": "no price data for " + sym}
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    sig = r.model_dump()
+    sig["ticker"] = sym
+    try:
+        fig = build_signal_chart(df, sig, db.get_earnings(sym))
+        result = analyze_chart(fig, sig)
+    except Exception as e:
+        return {"error": str(e)}
+    db.save_ai_analysis(sym, result, signal_date=r.trend_change_date)
+    return result
 
 
 # ── static frontend (mounted last so /api/* wins) ────────────

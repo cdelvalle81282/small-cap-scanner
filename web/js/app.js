@@ -4,8 +4,9 @@ import * as overview from "./views/overview.js";
 import * as scanner from "./views/scanner.js";
 import * as performance from "./views/performance.js";
 import * as detail from "./views/detail.js";
+import * as tracking from "./views/tracking.js";
 
-const ROUTES = { overview, scanner, performance, ticker: detail };
+const ROUTES = { overview, scanner, performance, tracking, ticker: detail };
 const view = $("#view");
 
 const ctx = {

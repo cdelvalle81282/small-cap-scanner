@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { state } from "../state.js";
 import { $, pct, money, cls, mdLite, crossLabel } from "../util.js";
 
 const HZ = [15, 30, 60, 90];
@@ -23,11 +24,13 @@ export async function render(root, ctx, params) {
   const last = d.prices.length ? d.prices[d.prices.length - 1].c : null;
   const ff = d.follow_through && d.follow_through.forward_returns;
   const ai = d.ai_analysis;
+  const sig = (state.signal && state.signal.ticker === sym) ? state.signal : null;
 
   root.innerHTML = `
     <span class="dt-back" id="back">← Back to scanner</span>
     <div class="dt-head"><h1>${sym}</h1><span class="co">${stock.name || ""}</span>
-      <span class="price" style="margin-left:auto;font-size:20px">${money(last)}</span></div>
+      <span class="price" style="margin-left:auto;font-size:20px">${money(last)}</span>
+      ${sig ? `<span class="chip" id="watch" style="cursor:pointer">☆ Watch 30d</span>` : ""}</div>
 
     <div class="two" style="margin-bottom:14px">
       <div class="panel" style="grid-column:1 / -1"><div class="phead"><h3>Price · SMA overlay</h3>
@@ -46,11 +49,36 @@ export async function render(root, ctx, params) {
         </div>
         ${ff ? "" : `<div style="padding:0 14px 12px;color:var(--t3);font-family:var(--mono);font-size:11px">Open from a signal to see its realized returns.</div>`}
       </div>
-      <div class="panel"><div class="phead"><h3>AI chart analysis</h3>${ai ? `<span class="lbl">saved ${ai.analysis_date || ""}</span>` : ""}</div>
-        <div style="padding:12px 15px">${ai && ai.text ? `<div class="ai-text">${mdLite(ai.text)}</div>` : `<div style="color:var(--t3);font-family:var(--mono);font-size:11px">No saved AI analysis for ${sym}. (Live "Analyze with AI" wires in a later phase.)</div>`}</div>
+      <div class="panel"><div class="phead"><h3>AI chart analysis</h3>
+        ${sig ? `<span class="chip on" id="analyze" style="cursor:pointer">${ai ? "↻ Re-run" : "✦ Analyze"}</span>` : (ai ? `<span class="lbl">saved ${ai.analysis_date || ""}</span>` : "")}</div>
+        <div style="padding:12px 15px" id="ai-body">${ai && ai.text ? `<div class="ai-text">${mdLite(ai.text)}</div>` : `<div style="color:var(--t3);font-family:var(--mono);font-size:11px">No saved AI analysis${sig ? " yet — click Analyze." : ` for ${sym}.`}</div>`}</div>
       </div>
     </div>`;
   $("#back", root).onclick = () => ctx.navigate("scanner");
+
+  const az = $("#analyze", root);
+  if (az) az.onclick = async () => {
+    const b = $("#ai-body", root); az.textContent = "…";
+    b.innerHTML = `<div class="loading">Analyzing chart with Claude Sonnet 5 — ~20s…</div>`;
+    try {
+      const res = await api.analyze({ ticker: sym, signal_type: sig.signal_type, eps_change_pct: sig.eps_change_pct,
+        eps_change_date: sig.eps_change_date || "", trend_change_date: sig.trend_change_date,
+        fast_ma: sig.fast_ma, slow_ma: sig.slow_ma, days_between: sig.days_between });
+      b.innerHTML = res.error
+        ? `<div style="color:var(--red);font-family:var(--mono);font-size:11px">Error: ${res.error}</div>`
+        : `<div class="ai-text">${mdLite(res.text)}</div>`;
+    } catch (e) { b.innerHTML = `<div style="color:var(--red)">Error: ${e.message}</div>`; }
+    az.textContent = "↻ Re-run";
+  };
+  const wb = $("#watch", root);
+  if (wb) wb.onclick = async () => {
+    wb.textContent = "…";
+    try {
+      await api.watchAdd({ ticker: sym, signal_type: sig.signal_type, eps_change_pct: sig.eps_change_pct,
+        eps_date: sig.eps_change_date || "", signal_date: sig.trend_change_date, fast_ma: sig.fast_ma, slow_ma: sig.slow_ma });
+      wb.textContent = "✓ Watching";
+    } catch { wb.textContent = "✕ failed"; }
+  };
 
   // chart
   if (await waitForCharts() && d.prices.length) {

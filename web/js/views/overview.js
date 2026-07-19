@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { state } from "../state.js";
 import { $, pct, money, cls, qColor, crossLabel } from "../util.js";
 
 export async function render(root, ctx) {
@@ -32,9 +33,9 @@ export async function render(root, ctx) {
         <div id="toprows"></div></div>
     </div>`;
 
-  $("#toprows", root).innerHTML = top.map(r => {
+  $("#toprows", root).innerHTML = top.map((r, i) => {
     const bull = r.signal_type === "bullish";
-    return `<div class="trow" data-sym="${r.ticker}" data-cross="${r.trend_change_date}" data-dir="${r.signal_type}" style="grid-template-columns:64px 1.4fr 90px 70px 76px 54px">
+    return `<div class="trow" data-i="${i}" style="grid-template-columns:64px 1.4fr 90px 70px 76px 54px">
       <div><span class="dir ${bull ? "bull" : "bear"}">${bull ? "▲ BULL" : "▼ BEAR"}</span></div>
       <div class="tk"><b>${r.ticker}</b><span class="co">${r.name || ""}</span></div>
       <div class="eps ${cls(r.eps_change_pct)}">${pct(r.eps_change_pct)}</div>
@@ -46,6 +47,7 @@ export async function render(root, ctx) {
   $("#goscan", root).onclick = () => ctx.navigate("scanner");
   $("#toprows", root).onclick = e => {
     const t = e.target.closest(".trow"); if (!t) return;
-    ctx.navigate("ticker", { sym: t.dataset.sym, cross: t.dataset.cross, dir: t.dataset.dir });
+    const r = top[+t.dataset.i]; state.signal = r;
+    ctx.navigate("ticker", { sym: r.ticker, cross: r.trend_change_date, dir: r.signal_type });
   };
 }
