@@ -18,3 +18,10 @@ venv/
 # personal planning notes / droplet-only ops script (kept out of this public repo)
 plan.md
 run_pipeline.sh
+
+# large generated chart artifacts (outputs of the analysis scripts, not app assets)
+signal_charts.html
+signal_charts_sample.png
+signal_detail.png
+losers_charts.png
+winners_charts.png
