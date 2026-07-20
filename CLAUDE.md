@@ -31,10 +31,13 @@ Vanilla HTML/CSS/JS single-page app served by FastAPI, hash-routed (`web/js/view
 - **Overview** — KPI tiles, freshness, top signals by quality
 - **Scanner** — filter rail, signal table (sparklines · RVOL · quality score), linked focus panel. Clicking a ticker cell opens Detail
 - **Triggered** (route `performance`, nav label "Triggered") — track record of every trigger: current + 15/30/60/90d returns, aggregate cards, sortable columns, table capped to top 300 sorted rows
-- **Detail** — lightweight-charts candles + SMA 20/50/200, diagonal swing-pivot trendlines, AI support/resistance + trend-break levels, EPS/cross markers, forward returns, AI analysis, latest-news panel (4 Yahoo headlines, click out to source)
+- **Detail** — lightweight-charts candles + SMA 20/50/200, diagonal swing-pivot trendlines, AI support/resistance + trend-break levels, EPS/cross markers, forward returns, AI analysis, latest-news panel (4 Yahoo headlines, click out to source). Chart opens on the recent ~240 bars (~1 trading year) so earnings labels stay legible; scroll/zoom back for full history
 - **Tracking** — Alerts | Watchlist | Trades
 
-Chart gotcha: `createPriceLine` does NOT render in the standalone lightweight-charts build — draw horizontal levels and trendlines as `addLineSeries` instead (trendlines use `autoscaleInfoProvider: () => null` so they don't distort the candle scale). See memory `lightweight-charts-lines`.
+Frontend gotchas:
+- `createPriceLine` does NOT render in the standalone lightweight-charts build — draw horizontal levels and trendlines as `addLineSeries` instead (trendlines use `autoscaleInfoProvider: () => null` so they don't distort the candle scale). See memory `lightweight-charts-lines`.
+- Detail chart: do NOT `fitContent()` over the full multi-year history — every earnings report is a labelled marker, so at full zoom the labels collide into an unreadable cluster. `drawChart` defaults the visible range to the last ~240 bars via `setVisibleLogicalRange`; SMA200 stays populated across it and the user can still scroll back. See memory `detail-chart-window`.
+- Sortable tables use `.ft-tbl th{position:sticky;top:0}`, NOT `top:78px`. Each `.ft-tbl` lives inside its own `overflow:auto` wrapper (Triggered has `max-height:60vh`; Tracking tables get `overflow-y:auto` implicitly), i.e. its own scroll container — a topbar-height offset floats the header ~64px down into the table and hides the top rows. See memory `sticky-table-header`.
 
 Legacy Streamlit (`app.py`, `pages/1_Scanner.py` … `pages/5_Tracking.py`) is retired but kept in-repo for reference.
 
@@ -52,6 +55,7 @@ signal_watchlist, price_alerts, signal_alerts, trades
 - Commit message style: `feat:`, `fix:`, `refactor:` prefix
 - No comments unless the WHY is non-obvious
 - Kaleido requires Chrome: installed at /home/deploy/.local/share/choreographer/deps/chrome-linux64/chrome
+- Repo hygiene (gitignored): logs (`*.log`), backups (`*.bak`), `venv/`, `plan.md`, and the analysis-script chart artifacts (`signal_charts.html`, `losers_charts.png`, `winners_charts.png`, `signal_charts_sample.png`, `signal_detail.png`). Those 5 artifacts were also untracked from git (~6.8 MB, ~99% of the pack) — a `git filter-repo` history rewrite to purge them from past commits is documented but not yet run. `run_pipeline.sh` is droplet-only (gitignored, edit over SSH — see memory `pipeline-cron-polygon`)
 
 ## Cron jobs on droplet
 - `35 13 * * 1-5` — scan_and_notify.py (9:35 AM ET)
