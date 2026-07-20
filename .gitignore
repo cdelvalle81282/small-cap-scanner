@@ -6,3 +6,15 @@ data/
 .tmp/
 *.db
 .env
+
+# logs & backups (runtime artifacts, local + droplet)
+*.log
+*.bak
+
+# virtualenvs
+venv/
+.venv/
+
+# personal planning notes / droplet-only ops script (kept out of this public repo)
+plan.md
+run_pipeline.sh
