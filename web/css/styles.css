@@ -147,7 +147,7 @@ main{padding:18px 22px 60px;flex:1}
 .hcard .meter{height:6px;border-radius:3px;background:var(--bg-3);overflow:hidden;margin:10px 0 4px}
 .hcard .meter i{display:block;height:100%}
 .ft-tbl{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
-.ft-tbl th{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);text-align:right;padding:8px 12px;border-bottom:1px solid var(--border);position:sticky;top:78px;background:var(--bg-2)}
+.ft-tbl th{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);text-align:right;padding:8px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg-2);z-index:1}
 .ft-tbl th.l,.ft-tbl td.l{text-align:left}
 .ft-tbl td{padding:7px 12px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
 .ft-tbl tr:hover td{background:var(--bg-3)}

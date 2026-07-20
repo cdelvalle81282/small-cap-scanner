@@ -236,7 +236,12 @@ function drawChart(container, prices, cross, earnings) {
   markers.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
   candles.setMarkers(markers);
 
-  chart.timeScale().fitContent();
+  // Default to the recent ~year of bars, not the full multi-year history: at full
+  // zoom every earnings label collides into an unreadable cluster. The user can
+  // still scroll/zoom back for older context; SMA200 stays populated across it.
+  const N = prices.length, WINDOW = 240;
+  if (N > WINDOW) chart.timeScale().setVisibleLogicalRange({ from: N - WINDOW, to: N + 2 });
+  else chart.timeScale().fitContent();
   chartRef = { chart, candles, firstTime: prices[0].date, lastTime: prices[prices.length - 1].date, levelSeries: [] };
 }
 
