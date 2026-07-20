@@ -20,8 +20,9 @@ YFinance/Polygon → pipeline.py → SQLite (data/scanner.db) → core/ (Scanner
 - `core/scoring.py` — signal quality score (0-100 + factor breakdown)
 - `core/performance.py` — follow-through: current (mark-to-market) + forward returns at 15/30/60/90d per trigger, direction-aware, no stop
 - `core/chart_analyzer.py` — Claude vision AI analysis via kaleido PNG export (model: claude-sonnet-5). Saved analyses auto-expire after 7 days (`get_ai_analysis` TTL)
-- `api/main.py` — FastAPI JSON API (meta, signals, performance, ticker, watchlist, trades, analyze); also serves `web/`. **Both `/api/signals` and `/api/performance` are cached** (keyed on config + latest price date) and prewarmed on startup — `/api/performance` is the heaviest call, keep it cached + universe-constrained or the 502 returns (see memory `perf-endpoint-cost`)
-- `core/notifier.py` — alert dispatch stubs (email/Slack not yet wired)
+- `api/main.py` — FastAPI JSON API (meta, signals, performance, ticker, news, watchlist, trades, analyze); also serves `web/`. **Both `/api/signals` and `/api/performance` are cached** (keyed on config + latest price date) and prewarmed on startup — `/api/performance` is the heaviest call, keep it cached + universe-constrained or the 502 returns (see memory `perf-endpoint-cost`)
+- `/api/news/{sym}` — lazy Yahoo Finance headlines (top 4) via yfinance `.news`, 30-min in-memory cache. A fetch failure or an unparseable payload (likely a yfinance schema change) is **never swallowed**: it fires a throttled ops alert via `notify_ops` and returns a visible `error` to the UI. `YFinanceProvider.get_news` raises `NewsFetchError` on failure but returns `[]` for a genuinely empty feed
+- `core/notifier.py` — `send_alert` (price-level; email/Slack still stubs) + `notify_ops(subject, message)` (wired to `SLACK_WEBHOOK_URL` / SMTP env, used for the news-feed failure alerts)
 - `monitor.py` — daily watchlist price level checker
 - `scan_and_notify.py` — daily new signal scanner, writes to signal_alerts table
 
@@ -30,7 +31,7 @@ Vanilla HTML/CSS/JS single-page app served by FastAPI, hash-routed (`web/js/view
 - **Overview** — KPI tiles, freshness, top signals by quality
 - **Scanner** — filter rail, signal table (sparklines · RVOL · quality score), linked focus panel. Clicking a ticker cell opens Detail
 - **Triggered** (route `performance`, nav label "Triggered") — track record of every trigger: current + 15/30/60/90d returns, aggregate cards, sortable columns, table capped to top 300 sorted rows
-- **Detail** — lightweight-charts candles + SMA 20/50/200, diagonal swing-pivot trendlines, AI support/resistance + trend-break levels, EPS/cross markers, forward returns, AI analysis
+- **Detail** — lightweight-charts candles + SMA 20/50/200, diagonal swing-pivot trendlines, AI support/resistance + trend-break levels, EPS/cross markers, forward returns, AI analysis, latest-news panel (4 Yahoo headlines, click out to source)
 - **Tracking** — Alerts | Watchlist | Trades
 
 Chart gotcha: `createPriceLine` does NOT render in the standalone lightweight-charts build — draw horizontal levels and trendlines as `addLineSeries` instead (trendlines use `autoscaleInfoProvider: () => null` so they don't distort the candle scale). See memory `lightweight-charts-lines`.

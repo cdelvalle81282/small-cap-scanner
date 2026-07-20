@@ -3,6 +3,11 @@
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const el = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 
+// escape untrusted text before dropping it into an HTML template literal
+export const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 export const pct = (v, dp = 0) => v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(dp)}%`;
 export const money = (v) => v == null ? "—" : `$${v.toFixed(2)}`;
 export const cls = (v) => v == null ? "" : (v >= 0 ? "pos" : "neg");

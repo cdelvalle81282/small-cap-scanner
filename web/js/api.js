@@ -18,6 +18,7 @@ export const api = {
   signals: (f) => get("/api/signals", f),
   performance: (f) => get("/api/performance", f),
   ticker: (sym, f) => get(`/api/ticker/${sym}`, f),
+  news: (sym) => get(`/api/news/${sym}`),
   analyze: (body) => send("/api/analyze", "POST", body),
   watchlist: () => get("/api/watchlist"),
   watchAdd: (body) => send("/api/watchlist", "POST", body),

@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { state } from "../state.js";
-import { $, pct, money, cls, mdLite, crossLabel } from "../util.js";
+import { $, pct, money, cls, mdLite, crossLabel, esc } from "../util.js";
 
 const HZ = [15, 30, 60, 90];
 let chartRef = { candles: null, lines: [] };
@@ -14,6 +14,39 @@ async function waitForCharts(ms = 3000) {
 function aiBody(ai, sig, sym) {
   if (ai && ai.text) return `<div class="ai-text">${mdLite(ai.text)}</div>`;
   return `<div style="color:var(--t3);font-family:var(--mono);font-size:12px">No saved AI analysis${sig ? " yet — click Analyze." : ` for ${sym}.`}</div>`;
+}
+
+function relDate(s) {
+  if (!s) return "";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "";
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1d ago";
+  if (days < 30) return `${days}d ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+}
+
+// Lazy-load up to 4 headlines. A backend failure comes back as res.error and is
+// shown loudly (the ops team is alerted server-side), never as a silent blank.
+async function loadNews(root, sym) {
+  const body = $("#news-body", root);
+  if (!body) return;
+  let res;
+  try { res = await api.news(sym); }
+  catch (e) { body.innerHTML = `<div class="news-err">⚠ Could not load news (${esc(e.message)}).</div>`; return; }
+
+  if (res.error) { body.innerHTML = `<div class="news-err">⚠ ${esc(res.error)}</div>`; return; }
+  const items = res.items || [];
+  if (!items.length) { body.innerHTML = `<div class="news-empty">No recent news.</div>`; return; }
+
+  body.innerHTML = items.map(n => {
+    const url = /^https?:\/\//i.test(n.url || "") ? n.url : "#";
+    const meta = [n.publisher, relDate(n.published)].filter(Boolean).map(esc).join(" · ");
+    return `<a class="news-item" href="${esc(url)}" target="_blank" rel="noopener noreferrer">
+      <span class="news-title">${esc(n.title)}</span>
+      ${meta ? `<span class="news-meta">${meta}</span>` : ""}</a>`;
+  }).join("");
 }
 
 export async function render(root, ctx, params) {
@@ -62,8 +95,14 @@ export async function render(root, ctx, params) {
           ${sig ? `<span class="chip on" id="analyze" style="cursor:pointer">${ai ? "↻ Re-run" : "✦ Analyze"}</span>` : (ai ? `<span class="lbl">saved ${ai.analysis_date || ""}</span>` : "")}</div>
         <div style="padding:14px 16px" id="ai-body">${aiBody(ai, sig, sym)}</div>
       </div>
+    </div>
+
+    <div class="panel news-panel" style="margin-top:14px">
+      <div class="phead"><h3>Latest news</h3><span class="lbl">Yahoo Finance</span></div>
+      <div id="news-body"><div class="news-empty">Loading news…</div></div>
     </div>`;
   $("#back", root).onclick = () => ctx.navigate("scanner");
+  loadNews(root, sym);
 
   const az = $("#analyze", root);
   if (az) az.onclick = async () => {

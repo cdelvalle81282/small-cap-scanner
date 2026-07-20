@@ -7,6 +7,7 @@ Run locally:  uvicorn api.main:app --reload --port 8600
 """
 import json
 import threading
+import time
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -19,7 +20,10 @@ from pydantic import BaseModel
 
 from config import DB_PATH, ScannerConfig
 from core.database import Database
+from core.notifier import notify_ops
 from core.performance import DEFAULT_HORIZONS, follow_through, ticker_follow_through
+from core.providers.base import NewsFetchError
+from core.providers.yfinance_provider import YFinanceProvider
 from core.scanner import Scanner
 from core.scoring import score_signal
 
@@ -279,6 +283,56 @@ def ticker(sym: str, cross_date: str | None = None, direction: str = "bullish"):
         "ai_analysis": db.get_ai_analysis(sym),
         "follow_through": ff,
     }
+
+
+# ── news ─────────────────────────────────────────────────────
+# Lazy, on-demand Yahoo Finance headlines for the Detail view. Cached in memory
+# (news is ephemeral, no need to persist). A fetch failure is NOT swallowed: it
+# fires a throttled ops alert (Slack/email) and returns a visible error to the UI
+# so a broken yfinance feed surfaces immediately instead of showing a silent blank.
+_NEWS_TTL = 1800            # serve a ticker's headlines from cache for 30 min
+_NEWS_ALERT_THROTTLE = 1800  # at most one failure alert per 30 min (a break hits every ticker)
+_news_cache: dict[str, tuple[float, list]] = {}
+_news_alert_last = 0.0
+_news_lock = threading.Lock()
+
+
+def _alert_news_failure(sym: str, detail: str) -> None:
+    global _news_alert_last
+    now = time.time()
+    with _news_lock:
+        if now - _news_alert_last < _NEWS_ALERT_THROTTLE:
+            return  # already alerted recently; a schema break fails every ticker
+        _news_alert_last = now
+    notify_ops(
+        "News feed fetch failed",
+        f"First failing ticker: {sym}\n{detail}\n\n"
+        "The yfinance .news feed likely broke (schema change or upstream outage). "
+        "The Detail news panel is showing an error state until this is fixed.",
+    )
+
+
+@app.get("/api/news/{sym}")
+def news(sym: str):
+    sym = sym.upper()
+    now = time.time()
+    with _news_lock:
+        hit = _news_cache.get(sym)
+        if hit and now - hit[0] < _NEWS_TTL:
+            return {"ticker": sym, "items": hit[1], "error": None}
+
+    try:
+        items = YFinanceProvider().get_news(sym, limit=4)
+    except NewsFetchError as e:
+        _alert_news_failure(sym, str(e))
+        return {"ticker": sym, "items": [], "error": "News fetch failed. The team has been notified."}
+    except Exception as e:  # unexpected: still report, never silent
+        _alert_news_failure(sym, f"unexpected error: {e!r}")
+        return {"ticker": sym, "items": [], "error": "News fetch failed. The team has been notified."}
+
+    with _news_lock:
+        _news_cache[sym] = (now, items)
+    return {"ticker": sym, "items": items, "error": None}
 
 
 # ── watchlist ────────────────────────────────────────────────

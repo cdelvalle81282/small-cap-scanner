@@ -1,11 +1,21 @@
 import logging
+from datetime import datetime, timezone
 
 import pandas as pd
 import yfinance as yf
 
-from core.providers.base import DataProvider
+from core.providers.base import DataProvider, NewsFetchError
 
 logger = logging.getLogger(__name__)
+
+
+def _nested(d, *keys):
+    """Safely walk nested dict keys, returning None if any hop is missing."""
+    for k in keys:
+        if not isinstance(d, dict):
+            return None
+        d = d.get(k)
+    return d
 
 # Validated tickers ($1-$50, confirmed active March 2026)
 # Covers biotech, tech, EV/energy, fintech, space, consumer, cannabis, ADRs
@@ -295,3 +305,67 @@ class YFinanceProvider(DataProvider):
         except Exception:
             logger.exception("get_stock_info failed for %s", ticker)
             return empty
+
+    def get_news(self, ticker: str, limit: int = 4) -> list[dict]:
+        """Return up to `limit` most-recent Yahoo Finance news items for a ticker.
+
+        Each item: {title, url, publisher, published}. An empty list means the
+        ticker legitimately has no news, a normal, quiet outcome.
+
+        Unlike the other fetchers here, this does NOT swallow errors into an empty
+        result: a fetch failure, a non-list payload, or a non-empty payload we
+        can't parse (the likely symptom of a yfinance schema change) all raise
+        NewsFetchError so the caller can alert. Silent blanks would hide breakage.
+        """
+        try:
+            raw = yf.Ticker(ticker).news
+        except Exception as e:
+            raise NewsFetchError(f"yfinance .news raised for {ticker}: {e!r}") from e
+
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise NewsFetchError(
+                f"yfinance .news returned {type(raw).__name__} (expected list) for {ticker}"
+            )
+        if not raw:
+            return []
+
+        items: list[dict] = []
+        for entry in raw:
+            # yfinance 1.x nests fields under "content"; older versions were flat.
+            c = entry.get("content", entry) if isinstance(entry, dict) else {}
+            title = c.get("title") or (entry.get("title") if isinstance(entry, dict) else None)
+            url = (
+                _nested(c, "clickThroughUrl", "url")
+                or _nested(c, "canonicalUrl", "url")
+                or (entry.get("link") if isinstance(entry, dict) else None)
+            )
+            if not title or not url:
+                continue
+
+            published = c.get("pubDate") or (
+                entry.get("providerPublishTime") if isinstance(entry, dict) else None
+            )
+            if isinstance(published, (int, float)):  # old schema: epoch seconds
+                published = datetime.fromtimestamp(published, tz=timezone.utc).isoformat()
+
+            items.append({
+                "title": str(title),
+                "url": str(url),
+                "publisher": _nested(c, "provider", "displayName")
+                or (entry.get("publisher") if isinstance(entry, dict) else "")
+                or "",
+                "published": published or "",
+            })
+            if len(items) >= limit:
+                break
+
+        # Non-empty payload but nothing parseable -> the shape almost certainly
+        # changed upstream. Treat as a failure so it gets reported, not blanked.
+        if not items:
+            raise NewsFetchError(
+                f"yfinance returned {len(raw)} news item(s) for {ticker} but none had a "
+                f"title+url in the expected shape (schema change?)"
+            )
+        return items

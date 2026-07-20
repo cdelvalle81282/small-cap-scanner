@@ -3,6 +3,15 @@ from abc import ABC, abstractmethod
 import pandas as pd
 
 
+class NewsFetchError(Exception):
+    """A news fetch failed or returned an unrecognized shape.
+
+    Deliberately distinct from an empty result (a ticker with no news), which is
+    a normal, quiet outcome. Raise this only when something is actually broken
+    (upstream error, or a payload shape we can't parse) so the caller can alert.
+    """
+
+
 class DataProvider(ABC):
     @abstractmethod
     def get_price_history(self, ticker: str, start: str, end: str) -> pd.DataFrame:
